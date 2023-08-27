@@ -69,7 +69,6 @@ import Data.String.Interpolate (__i)
 import Prelude hiding ((.), id)
 
 import qualified Control.Monad.Catch as Catch
-import qualified Data.List as List
 import qualified System.FilePath as FilePath
 
 {-| A well-typed path whose type parameters indicate what type of path it is:
@@ -605,23 +604,19 @@ replaceSuffix oldSuffix newSuffix path =
 (root </> dir "foo" </> file "bar",["tar","gz"])
 -}
 splitExtensions :: Path a 'File -> (Path a 'File, [String])
-splitExtensions PathId = (PathId, [])
-splitExtensions (PathFile parent component) =
-    (PathFile parent prefix0, extensions0)
+splitExtensions PathId = (PathId, [ ])
+splitExtensions (PathFile parent component0) =
+    (PathFile parent newComponent0, diffs0 [])
   where
-    (prefix0, suffix0) = List.break FilePath.isExtSeparator component
+    ~(newComponent0, diffs0) = loop component0
 
-    extensions0 = case suffix0 of
-        ""         -> [ ]
-        _ : suffix -> loop suffix
-
-    loop suffix1 = prefix : extensions_
+    loop component = case suffix of
+        [ ]       -> (prefix, id)
+        _ : uffix -> (newComponent, diffs . (uffix :))
       where
-        (prefix, suffix2) = List.break FilePath.isExtSeparator suffix1
+        (prefix, suffix) = FilePath.splitExtension component
 
-        extensions_ = case suffix2 of
-            ""          -> []
-            _ : suffix3 -> loop suffix3
+        ~(newComponent, diffs) = loop prefix
 
 {-| Return the list of extensions for a `Path`
 
@@ -659,7 +654,7 @@ id
 -}
 addExtensions
     :: MonadThrow m => Path a 'File -> [String] -> m (Path a 'File)
-addExtensions PathId [] =
+addExtensions PathId [ ] =
     pure PathId
 addExtensions PathId _ =
     Catch.throwM EmptyPath{ path = toFilePath PathId }
