@@ -225,7 +225,9 @@ instance Exception EmptyPath where
         path: #{path}
         |]
 
-{-| `split` splits a non-empty `Path` into its `dirname` and `basename`
+{-| `split` splits a non-empty `Path` into its `dirname` and `basename`.
+
+    This is analogous to @"System.FilePath".`FilePath.splitFileName`@.
 
     The first part of the result is everything except the last path component
     and the second part of the result is the last path component.
@@ -257,6 +259,8 @@ split path = case path of
 
 {-| `dirname` drops the last path component of a `Path`
 
+    This is analogous to @"System.FilePath".`FilePath.takeDirectory`@.
+
 @
 'dirname' path = 'fmap' 'fst' ('split' path)
 @
@@ -281,6 +285,18 @@ dirname :: MonadThrow m => Path a c -> m (Path a 'Dir)
 dirname path = fmap fst (split path)
 
 {-| `basename` returns the last path component of a `Path`
+
+    __Carefully note:__ This does not behave the same as
+    @"System.FilePath".`FilePath.takeBaseName`@, which returns the last path
+    component minus any extensions.  This `basename` utility preserves all
+    extensions and corresponds more closely to
+    @"System.FilePath".`FilePath.takeFileName`@.  The reason for not following
+    the same naming convention is because:
+
+    - This does not always return a file (the last path component can be a
+      directory)
+    - This adheres more closely to Unix naming conventions (where "basename"
+      typically refers to the entirety of the last path component)
 
 @
 'basename' path = 'fmap' 'snd' ('split' path)
@@ -323,6 +339,8 @@ instance Exception InvalidPrefix where
         |]
 
 {-| `stripPrefix` strips a `Path` prefix from another `Path`.
+
+    This is analogous to @"System.FilePath".`FilePath.makeRelative`@.
 
     This throws `InvalidPrefix` if the given `Path` prefix is not a valid
     prefix of the `Path` to strip.
