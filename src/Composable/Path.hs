@@ -111,6 +111,12 @@ data Path (a :: Node) (b :: Node) where
     PathDir :: Path a 'Dir -> FilePath -> Path a 'Dir
     PathFile :: Path a 'Dir -> FilePath -> Path a 'File
 
+instance Eq (Path a b) where
+    x == y = toFilePath x == toFilePath y
+
+instance Ord (Path a b) where
+    compare x y = compare (toFilePath x) (toFilePath y)
+
 {-| All path components have two type parameters, both of which are `Node`s
 
     These `Node` type parameters represent where a path component \"begins\"
