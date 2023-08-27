@@ -322,7 +322,10 @@ instance Exception InvalidPrefix where
         path to strip: #{pathToStrip}
         |]
 
-{-| Strip a `Path` prefix from another `Path`
+{-| `stripPrefix` strips a `Path` prefix from another `Path`.
+
+    This throws `InvalidPrefix` if the given `Path` prefix is not a valid
+    prefix of the `Path` to strip.
 
 @
 `stripPrefix` `id` = `pure` `id`
@@ -477,7 +480,10 @@ instance Exception InvalidSuffix where
         path to strip: #{pathToStrip}
         |]
 
-{-| Strip a `Path` suffix from another `Path`
+{-| `stripSuffix` strips a `Path` suffix from another `Path`.
+
+    This throws `InvalidSuffix` if the given `Path` suffix is not a valid
+    suffix of the `Path` to strip.
 
 @
 `stripSuffix` `id` = `pure` `id`
