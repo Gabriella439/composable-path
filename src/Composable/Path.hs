@@ -40,19 +40,17 @@ import Control.Exception (Exception(..))
 import Control.Monad.Catch (MonadThrow(..))
 import Data.String.Interpolate (__i)
 import Prelude hiding ((.), id)
-import System.OsPath (OsPath)
 
-import qualified Control.Exception as Exception
 import qualified Control.Monad.Catch as Catch
-import qualified System.OsPath as OsPath
+import qualified System.FilePath as FilePath
 
 data Node = Root | Dir | File
 
 data Path (a :: Node) (b :: Node) where
     PathId :: Path a a
     PathRoot :: Path 'Root 'Dir
-    PathDir :: Path a 'Dir -> OsPath -> Path a 'Dir
-    PathFile :: Path a 'Dir -> OsPath -> Path a 'File
+    PathDir :: Path a 'Dir -> FilePath -> Path a 'Dir
+    PathFile :: Path a 'Dir -> FilePath -> Path a 'File
 
 instance Category Path where
     id = PathId
@@ -68,7 +66,7 @@ instance Category Path where
     path . PathId = path
 
 instance Show (Path a b) where
-    show path = show (unsafeToFilePath path)
+    show path = show (toFilePath path)
 
 (</>) :: Path a b -> Path b c -> Path a c
 (</>) = (>>>)
@@ -76,31 +74,19 @@ instance Show (Path a b) where
 root :: Path 'Root 'Dir
 root = PathRoot
 
-dir :: OsPath -> Path Dir Dir
+dir :: FilePath -> Path 'Dir 'Dir
 dir component = PathDir PathId component
 
-file :: OsPath -> Path Dir File
+file :: FilePath -> Path 'Dir 'File
 file component = PathFile PathId component
 
-toOsPath :: MonadThrow m => Path a b -> m OsPath
-toOsPath PathId = OsPath.encodeUtf ""
-toOsPath PathRoot = OsPath.encodeUtf "/"
-toOsPath (PathDir parent_ component) = do
-    newParent <- toOsPath parent_
-    pure (newParent OsPath.</> component)
-toOsPath (PathFile parent_ component) = do
-    newParent <- toOsPath parent_
-    pure (newParent OsPath.</> component)
-
-toFilePath :: MonadThrow m => Path a b -> m FilePath
-toFilePath path = do
-    ospath <- toOsPath path
-    OsPath.decodeUtf ospath
-
-unsafeToFilePath :: Path a b -> FilePath
-unsafeToFilePath path = case toFilePath path of
-    Left exception -> Exception.throw exception
-    Right filepath -> filepath
+toFilePath :: Path a b -> FilePath
+toFilePath PathId = ""
+toFilePath PathRoot = "/"
+toFilePath (PathDir parent_ component) =
+    toFilePath parent_ FilePath.</> component
+toFilePath (PathFile parent_ component) =
+    toFilePath parent_ FilePath.</> component
 
 -- toFilePath (pathL </> pathR) = toFilePath pathL </> toFilePath pathR
 -- toFilePath id = theIdentityFilePath
@@ -157,8 +143,8 @@ stripProperPrefix prefix pathToStrip = case prefix of
                 Catch.throwM invalidPrefix
   where
     invalidPrefix = InvalidPrefix
-        { prefix = unsafeToFilePath prefix
-        , pathToStrip = unsafeToFilePath pathToStrip
+        { prefix = toFilePath prefix
+        , pathToStrip = toFilePath pathToStrip
         }
 
 isProperPrefixOf :: Path a b -> Path a c -> Bool
@@ -185,14 +171,14 @@ instance Exception InvalidParent where
         path: #{path}
         |]
 
-parent :: MonadThrow m => Path a b -> m (Path a Dir)
+parent :: MonadThrow m => Path a b -> m (Path a 'Dir)
 parent path = case path of
     PathId -> Catch.throwM invalidParent
     PathRoot -> Catch.throwM invalidParent
     PathDir parent_ _ -> pure parent_
     PathFile parent_ _ -> pure parent_
   where
-    invalidParent = InvalidParent{ path = unsafeToFilePath path }
+    invalidParent = InvalidParent{ path = toFilePath path }
 
 data InvalidFilename = InvalidFilename
     { path :: FilePath
@@ -206,12 +192,12 @@ instance Exception InvalidFilename where
         path: #{path}
         |]
 
-filename :: MonadThrow m => Path a File -> m (Path Dir File)
+filename :: MonadThrow m => Path a 'File -> m (Path 'Dir 'File)
 filename path = case path of
     PathId -> Catch.throwM invalidFilename
     PathFile _ component -> pure (file component)
   where
-    invalidFilename = InvalidFilename{ path = unsafeToFilePath path }
+    invalidFilename = InvalidFilename{ path = toFilePath path }
 
 data InvalidDirname = InvalidDirname
     { path :: FilePath
@@ -225,10 +211,10 @@ instance Exception InvalidDirname where
         path: #{path}
         |]
 
-dirname :: MonadThrow m => Path a Dir -> m (Path Dir Dir)
+dirname :: MonadThrow m => Path a 'Dir -> m (Path 'Dir 'Dir)
 dirname path = case path of
     PathId -> Catch.throwM invalidDirname
     PathRoot -> Catch.throwM invalidDirname
     PathDir _ component -> pure (dir component)
   where
-    invalidDirname = InvalidDirname{ path = unsafeToFilePath path }
+    invalidDirname = InvalidDirname{ path = toFilePath path }
