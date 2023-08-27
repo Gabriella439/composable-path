@@ -27,6 +27,9 @@ module Composable.Path
     , file
     , (</>)
 
+    -- * Elimination
+    , toFilePath
+
     -- * Splitting
     , split
     , parent
@@ -35,11 +38,13 @@ module Composable.Path
     -- * Prefixes
     , stripPrefix
     , isPrefixOf
+    , replacePrefix
 
     -- * Extensions
     , splitExtensions
     , extensions
     , dropExtensions
+    , addExtensions
 
     -- * Exceptions
     , EmptyPath(..)
@@ -83,19 +88,19 @@ import qualified System.FilePath as FilePath
     … and you can combine those primitive `Path`s using (`</>`) to create
     longer `Path`s, like this:
 
-    >>> root </> dir "foo" </> file "bar"
-    root </> dir "foo" </> file "bar"
-    >>> :type it
-    it :: Path 'Root 'File
-    >>> toFilePath it
-    "/foo/bar"
+>>> root </> dir "foo" </> file "bar"
+root </> dir "foo" </> file "bar"
+>>> :type it
+it :: Path 'Root 'File
+>>> toFilePath it
+"/foo/bar"
 
-    >>> dir "foo" </> dir "bar" </> dir "baz"
-    dir "foo" </> dir "bar" </> dir "baz"
-    >>> :type it
-    it :: Path 'Dir 'Dir
-    >>> toFilePath it
-    "foo/bar/baz"
+>>> dir "foo" </> dir "bar" </> dir "baz"
+dir "foo" </> dir "bar" </> dir "baz"
+>>> :type it
+it :: Path 'Dir 'Dir
+>>> toFilePath it
+"foo/bar/baz"
 
     As the above examples show, you can use `toFilePath` to convert a `Path`
     back into a `FilePath`.
@@ -157,7 +162,7 @@ instance Show (Path a b) where
 (</>) :: Path a b -> Path b c -> Path a c
 (</>) = (>>>)
 
-infixr 5 </>
+infixl 5 </>
 
 -- | The root of the filesystem
 root :: Path 'Root 'Dir
@@ -312,6 +317,7 @@ instance Exception InvalidPrefix where
 
 @
 `stripPrefix` `id` = `pure` `id`
+
 `stripPrefix` (f `.` g) = liftA2 (.) (`stripPrefix` f) (`stripPrefix` g)
 @
 
@@ -420,6 +426,31 @@ stripPrefix prefix pathToStrip = case prefix of
 isPrefixOf :: Path a b -> Path a c -> Bool
 isPrefixOf prefix path = isJust (stripPrefix prefix path)
 
+{-| Replace a `Path` prefix with a new one
+
+@
+'replacePrefix' oldPrefix newPrefix path =
+    'fmap' (newPrefix '</>') ('stripPrefix' oldPrefix path)
+@
+
+@
+'replacePrefix' id prefix path = 'pure' (prefix '</>' path)
+
+'replacePrefix' prefix id path = 'stripPrefix' prefix path
+@
+
+>>> replacePrefix (dir "foo") (dir "bar") (dir "foo" </> file "baz")
+dir "bar" </> file "baz"
+>>> replacePrefix (dir "foo") (dir "bar") (dir "fob" </> file "baz")
+*** Exception: InvalidPrefix {prefix = "foo", pathToStrip = "fob/baz"}
+
+>>> replacePrefix (root </> dir "foo") (dir "..") (root </> dir "foo" </> dir "bar")
+dir ".." </> dir "bar"
+-}
+replacePrefix :: MonadThrow m => Path a c -> Path b c -> Path a d -> m (Path b d)
+replacePrefix oldPrefix newPrefix path =
+    fmap (newPrefix </>) (stripPrefix oldPrefix path)
+
 {-| Separate out the extensions from a `Path`, returning the original
     path minus extensions and then list of extensions
 
@@ -466,3 +497,29 @@ extensions path = snd (splitExtensions path)
 -}
 dropExtensions :: Path a 'File -> Path a 'File
 dropExtensions path = fst (splitExtensions path)
+
+{-| Add extensions to the end of a `Path`
+
+@
+'uncurry' 'addExtensions' ('splitExtensions' path) = path
+
+'addExtensions' path `[]` = `[]`
+@
+
+>>> addExtensions (dir "foo" </> file "bar") [ "tar", "gz" ]
+dir "foo" </> file "bar.tar.gz"
+>>> addExtensions id [ "tar", "gz" ]
+*** Exception: EmptyPath {path = ""}
+>>> addExtensions id []
+id
+
+-}
+addExtensions
+    :: MonadThrow m => Path a 'File -> [String] -> m (Path a 'File)
+addExtensions PathId [] =
+    pure PathId
+addExtensions PathId _ =
+    Catch.throwM EmptyPath{ path = toFilePath PathId }
+addExtensions (PathFile parent_ component) extensions_ = do
+    let newComponent = foldl FilePath.addExtension component extensions_
+    pure (PathFile parent_ newComponent)
