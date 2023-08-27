@@ -44,6 +44,11 @@ module Composable.Path
     , replaceSuffix
 
     -- * Extensions
+    , splitExtension
+    , extension
+    , dropExtension
+    , addExtension
+    , hasExtension
     , splitExtensions
     , extensions
     , dropExtensions
@@ -593,8 +598,82 @@ replaceSuffix
 replaceSuffix oldSuffix newSuffix path =
     fmap (</> newSuffix) (stripSuffix oldSuffix path)
 
+{-| Separate out the extension from a `Path`, returning the original
+    path minus the extension and the extension (if present)
+
+    This is analogous to @"System.FilePath".`FilePath.splitExtension`@.
+
+>>> splitExtension (file "foo.tar.gz")
+(file "foo.tar",Just "gz")
+>>> splitExtension id
+(id,Nothing)
+>>> splitExtension (root </> dir "foo" </> file "bar.tar.gz")
+(root </> dir "foo" </> file "bar.tar",Just "gz")
+-}
+splitExtension :: Path a 'File -> (Path a 'File, Maybe String)
+splitExtension PathId = (PathId, Nothing)
+splitExtension (PathFile parent component) =
+    (PathFile parent prefix, extension_)
+  where
+    (prefix, suffix) = FilePath.splitExtension component
+
+    extension_ = case suffix of
+        [ ]       -> Nothing
+        _ : uffix -> Just uffix
+
+{-| Return the extension (if present) for a `Path`
+
+    This is analogous to @"System.FilePath".`FilePath.takeExtension`@.
+
+@
+'extension' path = 'snd' ('splitExtension' path)
+@
+-}
+extension :: Path a 'File -> Maybe String
+extension path = snd (splitExtension path)
+
+{-| Strip the extension (if present) from a `Path`
+
+    This is analogous to @"System.FilePath".`FilePath.dropExtension`@.
+
+@
+'dropExtension' path = 'fst' ('splitExtension' path)
+@
+-}
+dropExtension :: Path a 'File -> Path a 'File
+dropExtension path = fst (splitExtension path)
+
+{-| Add an extension to the end of a `Path`
+
+    This is analogous to @"System.FilePath".`FilePath.addExtension`@.
+
+>>> addExtension (dir "foo" </> file "bar") "zip"
+dir "foo" </> file "bar.zip"
+>>> addExtension id "zip"
+*** Exception: EmptyPath {path = ""}
+
+-}
+addExtension :: MonadThrow m => Path a 'File -> String -> m (Path a 'File)
+addExtension PathId _ =
+    Catch.throwM EmptyPath{ path = toFilePath PathId }
+addExtension (PathFile parent component) extension_ = do
+    pure (PathFile parent (FilePath.addExtension component extension_))
+
+{-| Check to see if a file has any extensions
+
+    This is analogous to @"System.FilePath".`FilePath.hasExtension`@.
+
+@
+'hasExtension' path = 'not' ('null' ('extensions' path))
+@
+-}
+hasExtension :: Path a 'File -> Bool
+hasExtension path = not (null (extensions path))
+
 {-| Separate out the extensions from a `Path`, returning the original
-    path minus extensions and then list of extensions
+    path minus extensions and list of extensions
+
+    This is analogous to @"System.FilePath".`FilePath.splitExtensions`@.
 
 >>> splitExtensions (file "foo.tar.gz")
 (file "foo",["tar","gz"])
@@ -620,6 +699,8 @@ splitExtensions (PathFile parent component0) =
 
 {-| Return the list of extensions for a `Path`
 
+    This is analogous to @"System.FilePath".`FilePath.takeExtensions`@.
+
 @
 'extensions' path = 'snd' ('splitExtensions' path)
 @
@@ -629,8 +710,10 @@ extensions path = snd (splitExtensions path)
 
 {-| Strip the extensions from a `Path`
 
+    This is analogous to @"System.FilePath".`FilePath.dropExtensions`@.
+
 @
-'dropExtensions' path = 'fst' ('dropExtensions' path)
+'dropExtensions' path = 'fst' ('splitExtensions' path)
 @
 -}
 dropExtensions :: Path a 'File -> Path a 'File
@@ -641,7 +724,7 @@ dropExtensions path = fst (splitExtensions path)
 @
 'uncurry' 'addExtensions' ('splitExtensions' path) = path
 
-'addExtensions' path `[]` = `[]`
+'addExtensions' path [] = []
 @
 
 >>> addExtensions (dir "foo" </> file "bar") [ "tar", "gz" ]
@@ -652,8 +735,7 @@ dir "foo" </> file "bar.tar.gz"
 id
 
 -}
-addExtensions
-    :: MonadThrow m => Path a 'File -> [String] -> m (Path a 'File)
+addExtensions :: MonadThrow m => Path a 'File -> [String] -> m (Path a 'File)
 addExtensions PathId [ ] =
     pure PathId
 addExtensions PathId _ =
