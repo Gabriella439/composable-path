@@ -32,7 +32,7 @@ module Composable.Path
 
     -- * Splitting
     , split
-    , parent
+    , dirname
     , basename
 
     -- * Prefixes
@@ -134,11 +134,11 @@ data Node
 instance Category Path where
     id = PathId
 
-    PathDir parent_ component . path =
-        PathDir (parent_ . path) component
+    PathDir parent component . path =
+        PathDir (parent . path) component
 
-    PathFile parent_ component . path =
-        PathFile (parent_ . path) component
+    PathFile parent component . path =
+        PathFile (parent . path) component
 
     PathId . path = path
 
@@ -149,17 +149,17 @@ instance Show (Path a b) where
     showsPrec _ PathRoot = showString "root"
     showsPrec precedence (PathDir PathId component) =
         showParen (precedence > 10) (showString "dir " . showsPrec 10 component)
-    showsPrec precedence (PathDir parent_ component) =
+    showsPrec precedence (PathDir parent component) =
         showParen (precedence > 5)
-            ( showsPrec 5 parent_
+            ( showsPrec 5 parent
             . showString " </> dir "
             . showsPrec 10 component
             )
     showsPrec precedence (PathFile PathId component) =
         showParen (precedence > 10) (showString "file " . showsPrec 10 component)
-    showsPrec precedence (PathFile parent_ component) =
+    showsPrec precedence (PathFile parent component) =
         showParen (precedence > 5)
-            ( showsPrec 5 parent_
+            ( showsPrec 5 parent
             . showString " </> file "
             . showsPrec 10 component
             )
@@ -201,10 +201,10 @@ file component = PathFile PathId component
 toFilePath :: Path a b -> FilePath
 toFilePath PathId = ""
 toFilePath PathRoot = "/"
-toFilePath (PathDir parent_ component) =
-    toFilePath parent_ FilePath.</> (component <> [ FilePath.pathSeparator ])
-toFilePath (PathFile parent_ component) =
-    toFilePath parent_ FilePath.</> component
+toFilePath (PathDir parent component) =
+    toFilePath parent FilePath.</> (component <> [ FilePath.pathSeparator ])
+toFilePath (PathFile parent component) =
+    toFilePath parent FilePath.</> component
 
 {-| This exception is thrown by operations that only supports non-empty
     paths when given an empty path
@@ -221,8 +221,7 @@ instance Exception EmptyPath where
         path: #{path}
         |]
 
-{-| `split` splits a non-empty `Path` into its `parent` path and its
-    `basename`s
+{-| `split` splits a non-empty `Path` into its `dirname` and `basename`
 
     The first part of the result is everything except the last path component
     and the second part of the result is the last path component.
@@ -247,35 +246,35 @@ split :: MonadThrow m => Path a c -> m (Path a 'Dir, Path 'Dir c)
 split path = case path of
     PathId -> Catch.throwM emptyPath
     PathRoot -> Catch.throwM emptyPath
-    PathDir parent_ component -> pure (parent_, dir component)
-    PathFile parent_ component -> pure (parent_, file component)
+    PathDir parent component -> pure (parent, dir component)
+    PathFile parent component -> pure (parent, file component)
   where
     emptyPath = EmptyPath{ path = toFilePath path }
 
-{-| `parent` drops the last path component of a `Path`
+{-| `dirname` drops the last path component of a `Path`
 
 @
-'parent' path = 'fmap' 'fst' ('split' path)
+'dirname' path = 'fmap' 'fst' ('split' path)
 @
 
     This throws an `EmptyPath` exception if the path has no path components.
 
->>> parent (file "foo")
+>>> dirname (file "foo")
 id
->>> parent (dir "foo")
+>>> dirname (dir "foo")
 id
->>> parent id
+>>> dirname id
 *** Exception: EmptyPath {path = ""}
->>> parent root
+>>> dirname root
 *** Exception: EmptyPath {path = "/"}
 
->>> parent (root </> dir "foo" </> file "bar")
+>>> dirname (root </> dir "foo" </> file "bar")
 root </> dir "foo"
->>> parent (dir "foo" </> dir "bar" </> dir "baz") 
+>>> dirname (dir "foo" </> dir "bar" </> dir "baz") 
 dir "foo" </> dir "bar"
 -}
-parent :: MonadThrow m => Path a c -> m (Path a 'Dir)
-parent path = fmap fst (split path)
+dirname :: MonadThrow m => Path a c -> m (Path a 'Dir)
+dirname path = fmap fst (split path)
 
 {-| `basename` returns the last path component of a `Path`
 
@@ -359,11 +358,11 @@ stripPrefix prefix pathToStrip = case prefix of
                 Catch.throwM invalidPrefix
             PathRoot -> do
                 pure PathId
-            PathDir parent_ component -> do
-                newParent <- stripPrefix prefix parent_
+            PathDir parent component -> do
+                newParent <- stripPrefix prefix parent
                 pure (PathDir newParent component)
-            PathFile parent_ component -> do
-                newParent <- stripPrefix prefix parent_
+            PathFile parent component -> do
+                newParent <- stripPrefix prefix parent
                 pure (PathFile newParent component)
     PathDir parentL componentL ->
         case alternative0 <|> alternative1 of
@@ -469,8 +468,8 @@ replacePrefix oldPrefix newPrefix path =
 -}
 splitExtensions :: Path a 'File -> (Path a 'File, [String])
 splitExtensions PathId = (PathId, [])
-splitExtensions (PathFile parent_ component) =
-    (PathFile parent_ prefix0, extensions0)
+splitExtensions (PathFile parent component) =
+    (PathFile parent prefix0, extensions0)
   where
     (prefix0, suffix0) = List.break (== '.') component
 
@@ -526,6 +525,6 @@ addExtensions PathId [] =
     pure PathId
 addExtensions PathId _ =
     Catch.throwM EmptyPath{ path = toFilePath PathId }
-addExtensions (PathFile parent_ component) extensions_ = do
+addExtensions (PathFile parent component) extensions_ = do
     let newComponent = foldl FilePath.addExtension component extensions_
-    pure (PathFile parent_ newComponent)
+    pure (PathFile parent newComponent)
