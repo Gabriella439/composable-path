@@ -591,7 +591,7 @@ splitExtensions PathId = (PathId, [])
 splitExtensions (PathFile parent component) =
     (PathFile parent prefix0, extensions0)
   where
-    (prefix0, suffix0) = List.break (== '.') component
+    (prefix0, suffix0) = List.break FilePath.isExtSeparator component
 
     extensions0 = case suffix0 of
         ""         -> [ ]
@@ -599,7 +599,7 @@ splitExtensions (PathFile parent component) =
 
     loop suffix1 = prefix : extensions_
       where
-        (prefix, suffix2) = List.break (== '.') suffix1
+        (prefix, suffix2) = List.break FilePath.isExtSeparator suffix1
 
         extensions_ = case suffix2 of
             ""          -> []
