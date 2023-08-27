@@ -133,16 +133,16 @@ instance Show (Path a b) where
     showsPrec precedence (PathDir PathId component) =
         showParen (precedence > 10) (showString "dir " . showsPrec 10 component)
     showsPrec precedence (PathDir parent_ component) =
-        showParen (precedence > 1)
-            ( showsPrec 1 parent_
+        showParen (precedence > 5)
+            ( showsPrec 5 parent_
             . showString " </> dir "
             . showsPrec 10 component
             )
     showsPrec precedence (PathFile PathId component) =
         showParen (precedence > 10) (showString "file " . showsPrec 10 component)
     showsPrec precedence (PathFile parent_ component) =
-        showParen (precedence > 1)
-            ( showsPrec 1 parent_
+        showParen (precedence > 5)
+            ( showsPrec 5 parent_
             . showString " </> file "
             . showsPrec 10 component
             )
@@ -150,6 +150,8 @@ instance Show (Path a b) where
 -- | Combine two paths
 (</>) :: Path a b -> Path b c -> Path a c
 (</>) = (>>>)
+
+infixr 5 </>
 
 -- | The root of the filesystem
 root :: Path 'Root 'Dir
