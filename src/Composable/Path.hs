@@ -35,10 +35,13 @@ module Composable.Path
     , dirname
     , basename
 
-    -- * Prefixes
+    -- * Prefixes and Suffixes
     , stripPrefix
     , isPrefixOf
     , replacePrefix
+    , stripSuffix
+    , isSuffixOf
+    , replaceSuffix
 
     -- * Extensions
     , splitExtensions
@@ -342,11 +345,10 @@ dir "bar" </> dir "baz"
 
 >>> stripPrefix (dir "foo") (file "foo")
 *** Exception: InvalidPrefix {prefix = "foo/", pathToStrip = "foo"}
-
-ghci> stripPrefix (dir "foo") (dir "bar")
-*** Exception: InvalidPrefix {prefix = "foo", pathToStrip = "bar"}
-ghci> stripPrefix (dir "foo" </> dir "bar") (dir "foo" </> dir "baz")
-*** Exception: InvalidPrefix {prefix = "foo/bar", pathToStrip = "foo/baz"}
+>>> stripPrefix (dir "foo") (dir "bar")
+*** Exception: InvalidPrefix {prefix = "foo/", pathToStrip = "bar/"}
+>>> stripPrefix (dir "foo" </> dir "bar") (dir "foo" </> dir "baz")
+*** Exception: InvalidPrefix {prefix = "foo/bar/", pathToStrip = "foo/baz/"}
 -}
 stripPrefix :: MonadThrow m => Path a b -> Path a c -> m (Path b c)
 stripPrefix prefix pathToStrip = case prefix of
@@ -452,9 +454,120 @@ dir "bar" </> file "baz"
 >>> replacePrefix (root </> dir "foo") (dir "..") (root </> dir "foo" </> dir "bar")
 dir ".." </> dir "bar"
 -}
-replacePrefix :: MonadThrow m => Path a c -> Path b c -> Path a d -> m (Path b d)
+replacePrefix
+    :: MonadThrow m => Path a c -> Path b c -> Path a d -> m (Path b d)
 replacePrefix oldPrefix newPrefix path =
     fmap (newPrefix </>) (stripPrefix oldPrefix path)
+
+{-| This exception is thrown when a `Path` is not a valid suffix of another
+    `Path`
+-}
+data InvalidSuffix = InvalidSuffix
+    { suffix :: FilePath
+    , pathToStrip :: FilePath
+    } deriving stock (Show)
+
+instance Exception InvalidSuffix where
+    displayException InvalidSuffix{..} =
+        [__i|
+        Invalid suffix
+
+        suffix       : #{suffix}
+        path to strip: #{pathToStrip}
+        |]
+
+{-| Strip a `Path` suffix from another `Path`
+
+@
+`stripSuffix` `id` = `pure` `id`
+
+`stripSuffix` (f `.` g) = liftA2 (.) (`stripSuffix` f) (`stripSuffix` g)
+@
+
+>>> stripSuffix root root
+id
+>>> stripSuffix (dir "foo") (dir "foo")
+id
+>>> stripSuffix (file "foo") (file "foo")
+id
+
+>>> stripSuffix (dir "foo") (root </> dir "foo")
+root
+>>> stripSuffix (file "bar") (root </> dir "foo" </> file "bar")
+root </> dir "foo"
+>>> stripSuffix (dir "bar" </> dir "baz") (dir "foo" </> dir "bar" </> dir "baz")
+dir "foo"
+
+>>> stripSuffix (dir "bar" </> file "foo") (file "foo")
+*** Exception: InvalidSuffix {suffix = "bar/", pathToStrip = ""}
+>>> stripSuffix (dir "foo") (dir "bar")
+*** Exception: InvalidSuffix {suffix = "foo/", pathToStrip = "bar/"}
+>>> stripSuffix (dir "foo" </> dir "bar") (dir "foo" </> dir "baz")
+*** Exception: InvalidSuffix {suffix = "foo/bar/", pathToStrip = "foo/baz/"}
+-}
+stripSuffix :: MonadThrow m => Path b c -> Path a c -> m (Path a b)
+stripSuffix suffix pathToStrip =
+    case suffix of
+        PathId ->
+            pure pathToStrip
+        PathRoot ->
+            case pathToStrip of
+                PathRoot -> pure PathId
+                _        -> Catch.throwM invalidSuffix
+        PathDir parentL componentL ->
+            case pathToStrip of
+                PathDir parentR componentR
+                    | componentL == componentR ->
+                        stripSuffix parentL parentR
+                _ ->
+                    Catch.throwM invalidSuffix
+        PathFile parentL componentL ->
+            case pathToStrip of
+                PathFile parentR componentR
+                    | componentL == componentR ->
+                        stripSuffix parentL parentR
+                _ ->
+                    Catch.throwM invalidSuffix
+  where
+    invalidSuffix = InvalidSuffix
+        { suffix = toFilePath suffix
+        , pathToStrip = toFilePath pathToStrip
+        }
+
+{-| Check to see if one `Path` is a suffix of another `Path`
+
+@
+'isSuffixOf' suffix path = 'isJust' ('stripSuffix' suffix path)
+@
+-}
+isSuffixOf :: Path b c -> Path a c -> Bool
+isSuffixOf suffix path = isJust (stripSuffix suffix path)
+
+{-| Replace a `Path` suffix with a new one
+
+@
+'replaceSuffix' oldSuffix newSuffix path =
+    'fmap' ('</>' newSuffix) ('stripSuffix' oldSuffix path)
+@
+
+@
+'replaceSuffix' id suffix path = 'pure' (path '</>' suffix)
+
+'replaceSuffix' suffix id path = 'stripSuffix' suffix path
+@
+
+>>> replaceSuffix (file "bar") (file "baz") (dir "foo" </> file "bar")
+dir "foo" </> file "baz"
+>>> replaceSuffix (file "bar") (dir "baz") (dir "foo" </> file "bat")
+*** Exception: InvalidSuffix {suffix = "bar", pathToStrip = "foo/bat"}
+
+>>> replaceSuffix (dir "foo" </> file "bar") (dir "baz") (root </> dir "foo" </> file "bar")
+root </> dir "baz"
+-}
+replaceSuffix
+    :: MonadThrow m => Path b c -> Path b d -> Path a c -> m (Path a d)
+replaceSuffix oldSuffix newSuffix path =
+    fmap (</> newSuffix) (stripSuffix oldSuffix path)
 
 {-| Separate out the extensions from a `Path`, returning the original
     path minus extensions and then list of extensions
