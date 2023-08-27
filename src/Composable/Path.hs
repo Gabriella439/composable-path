@@ -52,6 +52,7 @@ module Composable.Path
     -- * Exceptions
     , EmptyPath(..)
     , InvalidPrefix(..)
+    , InvalidSuffix(..)
 
     -- * Re-exports
     , Category(..)
