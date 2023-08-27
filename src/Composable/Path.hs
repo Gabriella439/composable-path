@@ -2,10 +2,13 @@
 {-# LANGUAGE DataKinds             #-}
 {-# LANGUAGE DerivingStrategies    #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE FlexibleContexts      #-}
+{-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE GADTs                 #-}
 {-# LANGUAGE KindSignatures        #-}
 {-# LANGUAGE QuasiQuotes           #-}
 {-# LANGUAGE RecordWildCards       #-}
+{-# LANGUAGE UndecidableInstances  #-}
 
 {-| This module provides a `Path` type that is well-typed, meaning that you
     can tell from the type of the `Path` whether it is a file or directory
@@ -26,6 +29,7 @@ module Composable.Path
     , dir
     , file
     , (</>)
+    , ParsePath(..)
 
     -- * Elimination
     , toFilePath
@@ -45,14 +49,14 @@ module Composable.Path
 
     -- * Extensions
     , splitExtension
-    , extension
-    , dropExtension
-    , addExtension
-    , hasExtension
     , splitExtensions
+    , extension
     , extensions
+    , dropExtension
     , dropExtensions
+    , addExtension
     , addExtensions
+    , hasExtension
 
     -- * Exceptions
     , EmptyPath(..)
@@ -69,12 +73,20 @@ import Control.Applicative (Alternative(..))
 import Control.Category (Category(..), (<<<), (>>>))
 import Control.Exception (Exception(..))
 import Control.Monad.Catch (MonadThrow(..))
+import Data.List.NonEmpty (NonEmpty(..))
 import Data.Maybe (isJust)
 import Data.String.Interpolate (__i)
 import Prelude hiding ((.), id)
 
 import qualified Control.Monad.Catch as Catch
+import qualified Data.List as List
+import qualified Data.List.NonEmpty as NonEmpty
 import qualified System.FilePath as FilePath
+
+{- $setup
+
+>>> :set -XDataKinds
+-}
 
 {-| A well-typed path whose type parameters indicate what type of path it is:
 
@@ -172,12 +184,6 @@ instance Show (Path a b) where
             . showsPrec 10 component
             )
 
--- | Combine two paths
-(</>) :: Path a b -> Path b c -> Path a c
-(</>) = (>>>)
-
-infixl 5 </>
-
 -- | The root of the filesystem
 root :: Path 'Root 'Dir
 root = PathRoot
@@ -189,6 +195,194 @@ dir component = PathDir PathId component
 -- | A path component that is a file
 file :: FilePath -> Path 'Dir 'File
 file component = PathFile PathId component
+
+-- | Combine two paths
+(</>) :: Path a b -> Path b c -> Path a c
+(</>) = (>>>)
+
+infixl 5 </>
+
+-- | This exception is thrown when failing to parse a `Path`
+data ParseFailure = ParseFailure
+    { reason :: String
+    } deriving stock (Show)
+
+instance Exception ParseFailure where
+    displayException ParseFailure{..} =
+        [__i|
+        Parse failure
+
+        reason: #{reason}
+        |]
+
+{-| Class for parsing `Path`s from `FilePath`s
+
+    The parsers are strict about what `FilePath`s they accept because they
+    enforce the following conventions:
+
+    - Absolute paths must begin with a trailing separator
+    - Relative paths must not begin with a trailing separator
+    - Directories must end with a trailing separator
+    - Files must not end with a trailing separator
+
+    This means that any given `FilePath` will only parse as one of the
+    following types:
+
+    - `Path Root Dir` - an absolute path to a directory
+    - `Path Root File` - an absolute path to a file
+    - `Path Dir Dir` - a relative path to a directory
+    - `Path Dir File` - a relative path to a file
+
+    The following examples spell out all of the possible cases:
+
+>>> parse @(Path 'Root 'Dir) "foo"
+*** Exception: ParseFailure {reason = "Absolute path does not begin with a leading /"}
+>>> parse @(Path 'Root 'File) "foo"
+*** Exception: ParseFailure {reason = "Absolute path does not begin with a leading /"}
+>>> parse @(Path 'Dir 'Dir) "foo"
+*** Exception: ParseFailure {reason = "Directory does not end with trailing /"}
+>>> parse @(Path 'Dir 'File) "foo"
+file "foo"
+
+>>> parse @(Path 'Root 'Dir) "/foo"
+*** Exception: ParseFailure {reason = "Directory does not end with trailing /"}
+>>> parse @(Path 'Root 'File) "/foo"
+root </> file "foo"
+>>> parse @(Path 'Dir 'Dir) "/foo"
+*** Exception: ParseFailure {reason = "Relative path begins with a leading /"}
+>>> parse @(Path 'Dir 'File) "/foo"
+*** Exception: ParseFailure {reason = "Relative path begins with a leading /"}
+
+>>> parse @(Path 'Root 'Dir) "foo/"
+*** Exception: ParseFailure {reason = "Absolute path does not begin with a leading /"}
+>>> parse @(Path 'Root 'File) "foo/"
+*** Exception: ParseFailure {reason = "Absolute path does not begin with a leading /"}
+>>> parse @(Path 'Dir 'Dir) "foo/"
+dir "foo"
+>>> parse @(Path 'Dir 'File) "foo/"
+*** Exception: ParseFailure {reason = "File ends with trailing /"}
+
+>>> parse @(Path 'Root 'Dir) "/foo/"
+root </> dir "foo"
+>>> parse @(Path 'Root 'File) "/foo/"
+*** Exception: ParseFailure {reason = "File ends with trailing /"}
+>>> parse @(Path 'Dir 'Dir) "/foo/"
+*** Exception: ParseFailure {reason = "Relative path begins with a leading /"}
+>>> parse @(Path 'Dir 'File) "/foo/"
+*** Exception: ParseFailure {reason = "Relative path begins with a leading /"}
+
+>>> parse @(Path 'Root 'Dir) "/"
+root
+>>> parse @(Path 'Root 'File) "/"
+*** Exception: ParseFailure {reason = "File ends with trailing /"}
+>>> parse @(Path 'Dir 'Dir) "/"
+*** Exception: ParseFailure {reason = "Relative path begins with a leading /"}
+>>> parse @(Path 'Dir 'File) "/"
+*** Exception: ParseFailure {reason = "Relative path begins with a leading /"}
+-}
+class ParsePath path where
+    parse :: MonadThrow m => FilePath -> m path
+
+instance ParsePath (Path 'Root 'Dir) where
+    parse filepath =
+        case filepathComponents filepath of
+            "" :| component : components -> do
+                let nonEmpty = component :| components
+
+                let directories = NonEmpty.init nonEmpty
+
+                if NonEmpty.last nonEmpty == ""
+                    then do
+                        pure (root </> foldr (</>) id (map dir directories))
+                    else do
+                        Catch.throwM noTrailingSeparator
+            _ -> do
+                Catch.throwM noLeadingSeparator
+
+instance ParsePath (Path 'Root 'File) where
+    parse filepath =
+        case filepathComponents filepath of
+            "" :| component : components -> do
+                let nonEmpty = component :| components
+
+                let directories = NonEmpty.init nonEmpty
+
+                let file_ = NonEmpty.last nonEmpty
+
+                if file_ == ""
+                    then do
+                        Catch.throwM unexpectedTrailingSeparator
+                    else do
+                        pure (root </> foldr (</>) (file file_) (map dir directories))
+            _ -> do
+                Catch.throwM noLeadingSeparator
+
+instance ParsePath (Path 'Dir 'Dir) where
+    parse filepath =
+        case filepathComponents filepath of
+            "" :| _ -> do
+                Catch.throwM unexpectedLeadingSeparator
+            components -> do
+                let directories = NonEmpty.init components
+
+                if NonEmpty.last components == ""
+                    then do
+                        pure (foldr (</>) id (map dir directories))
+                    else do
+                        Catch.throwM noTrailingSeparator
+
+instance ParsePath (Path 'Dir 'File) where
+    parse filepath =
+        case filepathComponents filepath of
+            "" :| _ -> do
+                Catch.throwM unexpectedLeadingSeparator
+            components -> do
+                let directories = NonEmpty.init components
+
+                let file_ = NonEmpty.last components
+
+                if file_ == ""
+                    then do
+                        Catch.throwM unexpectedTrailingSeparator
+                    else do
+                        pure (foldr (</>) (file file_) (fmap dir directories))
+
+instance ParsePath (Path 'File 'File) where
+    parse "" = pure PathId
+    parse _  = Catch.throwM ParseFailure{ reason = "Path must be empty " }
+
+instance ParsePath (Path 'Root 'Root) where
+    parse "" = pure PathId
+    parse _  = Catch.throwM ParseFailure{ reason = "Path must be empty " }
+
+noTrailingSeparator :: ParseFailure
+noTrailingSeparator = ParseFailure{..}
+  where
+    reason =
+        "Directory does not end with trailing " <> [ FilePath.pathSeparator ]
+
+unexpectedTrailingSeparator :: ParseFailure
+unexpectedTrailingSeparator = ParseFailure{..}
+  where
+    reason = "File ends with trailing " <> [ FilePath.pathSeparator ]
+
+noLeadingSeparator :: ParseFailure
+noLeadingSeparator = ParseFailure{..}
+  where
+    reason = "Absolute path does not begin with a leading " <> [ FilePath.pathSeparator ]
+
+unexpectedLeadingSeparator :: ParseFailure
+unexpectedLeadingSeparator = ParseFailure{..}
+  where
+    reason = "Relative path begins with a leading " <> [ FilePath.pathSeparator ]
+
+filepathComponents :: FilePath -> NonEmpty String
+filepathComponents filepath =
+    case suffix of
+        [ ] -> pure filepath
+        _ : uffix -> NonEmpty.cons prefix (filepathComponents uffix)
+  where
+    (prefix, suffix) = List.break FilePath.isPathSeparator filepath
 
 {-| Convert a `Path` to a `FilePath`
 
@@ -621,55 +815,6 @@ splitExtension (PathFile parent component) =
         [ ]       -> Nothing
         _ : uffix -> Just uffix
 
-{-| Return the extension (if present) for a `Path`
-
-    This is analogous to @"System.FilePath".`FilePath.takeExtension`@.
-
-@
-'extension' path = 'snd' ('splitExtension' path)
-@
--}
-extension :: Path a 'File -> Maybe String
-extension path = snd (splitExtension path)
-
-{-| Strip the extension (if present) from a `Path`
-
-    This is analogous to @"System.FilePath".`FilePath.dropExtension`@.
-
-@
-'dropExtension' path = 'fst' ('splitExtension' path)
-@
--}
-dropExtension :: Path a 'File -> Path a 'File
-dropExtension path = fst (splitExtension path)
-
-{-| Add an extension to the end of a `Path`
-
-    This is analogous to @"System.FilePath".`FilePath.addExtension`@.
-
->>> addExtension (dir "foo" </> file "bar") "zip"
-dir "foo" </> file "bar.zip"
->>> addExtension id "zip"
-*** Exception: EmptyPath {path = ""}
-
--}
-addExtension :: MonadThrow m => Path a 'File -> String -> m (Path a 'File)
-addExtension PathId _ =
-    Catch.throwM EmptyPath{ path = toFilePath PathId }
-addExtension (PathFile parent component) extension_ = do
-    pure (PathFile parent (FilePath.addExtension component extension_))
-
-{-| Check to see if a file has any extensions
-
-    This is analogous to @"System.FilePath".`FilePath.hasExtension`@.
-
-@
-'hasExtension' path = 'not' ('null' ('extensions' path))
-@
--}
-hasExtension :: Path a 'File -> Bool
-hasExtension path = not (null (extensions path))
-
 {-| Separate out the extensions from a `Path`, returning the original
     path minus extensions and list of extensions
 
@@ -697,6 +842,17 @@ splitExtensions (PathFile parent component0) =
 
         ~(newComponent, diffs) = loop prefix
 
+{-| Return the extension (if present) for a `Path`
+
+    This is analogous to @"System.FilePath".`FilePath.takeExtension`@.
+
+@
+'extension' path = 'snd' ('splitExtension' path)
+@
+-}
+extension :: Path a 'File -> Maybe String
+extension path = snd (splitExtension path)
+
 {-| Return the list of extensions for a `Path`
 
     This is analogous to @"System.FilePath".`FilePath.takeExtensions`@.
@@ -708,6 +864,17 @@ splitExtensions (PathFile parent component0) =
 extensions :: Path a 'File -> [String]
 extensions path = snd (splitExtensions path)
 
+{-| Strip the extension (if present) from a `Path`
+
+    This is analogous to @"System.FilePath".`FilePath.dropExtension`@.
+
+@
+'dropExtension' path = 'fst' ('splitExtension' path)
+@
+-}
+dropExtension :: Path a 'File -> Path a 'File
+dropExtension path = fst (splitExtension path)
+
 {-| Strip the extensions from a `Path`
 
     This is analogous to @"System.FilePath".`FilePath.dropExtensions`@.
@@ -718,6 +885,22 @@ extensions path = snd (splitExtensions path)
 -}
 dropExtensions :: Path a 'File -> Path a 'File
 dropExtensions path = fst (splitExtensions path)
+
+{-| Add an extension to the end of a `Path`
+
+    This is analogous to @"System.FilePath".`FilePath.addExtension`@.
+
+>>> addExtension (dir "foo" </> file "bar") "zip"
+dir "foo" </> file "bar.zip"
+>>> addExtension id "zip"
+*** Exception: EmptyPath {path = ""}
+
+-}
+addExtension :: MonadThrow m => Path a 'File -> String -> m (Path a 'File)
+addExtension PathId _ =
+    Catch.throwM EmptyPath{ path = toFilePath PathId }
+addExtension (PathFile parent component) extension_ = do
+    pure (PathFile parent (FilePath.addExtension component extension_))
 
 {-| Add extensions to the end of a `Path`
 
@@ -743,3 +926,14 @@ addExtensions PathId _ =
 addExtensions (PathFile parent component) extensions_ = do
     let newComponent = foldl FilePath.addExtension component extensions_
     pure (PathFile parent newComponent)
+
+{-| Check to see if a file has any extensions
+
+    This is analogous to @"System.FilePath".`FilePath.hasExtension`@.
+
+@
+'hasExtension' path = 'not' ('null' ('extensions' path))
+@
+-}
+hasExtension :: Path a 'File -> Bool
+hasExtension path = not (null (extensions path))
