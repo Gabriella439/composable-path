@@ -97,7 +97,12 @@ import qualified System.FilePath as FilePath
 'Path' 'Dir'  'File'  -- The type of a relative path to a file
 @
 
-    You can build a `Path` using the following primitive operations:
+    You can build a `Path` using `parse`:
+
+>>> parse @(Path Root File) "/foo/bar"
+root </> dir "foo" </> file "bar"
+
+    … or by using the following primitive operations:
 
     - `id` creates an empty `Path` (with zero path components)
     - `root` create an empty `Path` (with zero path components) anchored at the
@@ -384,7 +389,21 @@ filepathComponents filepath =
   where
     (prefix, suffix) = List.break FilePath.isPathSeparator filepath
 
-{-| Convert a `Path` to a `FilePath`
+{-| `toFilePath` converts a `Path` to a `FilePath`.
+
+@
+'fmap' 'toFilePath' ('parse' path) = 'pure' path  -- If parsing succeeds
+@
+
+    __Carefully note:__ The following law is __NOT__ always true:
+
+@
+'parse' ('toFilePath' path) = 'pure' path
+@
+
+    … if any of the path components are empty.  For example, this can happen if
+    you create a `Path` using the `dir` or `file` utilities directly (e.g.
+    @`dir` ""@).
 
 >>> toFilePath (file "foo")
 "foo"
