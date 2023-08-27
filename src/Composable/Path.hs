@@ -100,7 +100,7 @@ dir "foo" </> dir "bar" </> dir "baz"
 >>> :type it
 it :: Path 'Dir 'Dir
 >>> toFilePath it
-"foo/bar/baz"
+"foo/bar/baz/"
 
     As the above examples show, you can use `toFilePath` to convert a `Path`
     back into a `FilePath`.
@@ -181,7 +181,7 @@ file component = PathFile PathId component
 >>> toFilePath (file "foo")
 "foo"
 >>> toFilePath (dir "foo")
-"foo"
+"foo/"
 >>> toFilePath root
 "/"
 >>> toFilePath id
@@ -190,13 +190,13 @@ file component = PathFile PathId component
 >>> toFilePath (root </> dir "foo" </> file "bar")
 "/foo/bar"
 >>> toFilePath (dir "foo" </> dir "bar" </> dir "baz")
-"foo/bar/baz"
+"foo/bar/baz/"
 -}
 toFilePath :: Path a b -> FilePath
 toFilePath PathId = ""
 toFilePath PathRoot = "/"
 toFilePath (PathDir parent_ component) =
-    toFilePath parent_ FilePath.</> component
+    toFilePath parent_ FilePath.</> (component <> [ FilePath.pathSeparator ])
 toFilePath (PathFile parent_ component) =
     toFilePath parent_ FilePath.</> component
 
@@ -336,7 +336,7 @@ file "bar"
 dir "bar" </> dir "baz"
 
 >>> stripPrefix (dir "foo") (file "foo")
-*** Exception: InvalidPrefix {prefix = "foo", pathToStrip = "foo"}
+*** Exception: InvalidPrefix {prefix = "foo/", pathToStrip = "foo"}
 
 ghci> stripPrefix (dir "foo") (dir "bar")
 *** Exception: InvalidPrefix {prefix = "foo", pathToStrip = "bar"}
@@ -442,7 +442,7 @@ isPrefixOf prefix path = isJust (stripPrefix prefix path)
 >>> replacePrefix (dir "foo") (dir "bar") (dir "foo" </> file "baz")
 dir "bar" </> file "baz"
 >>> replacePrefix (dir "foo") (dir "bar") (dir "fob" </> file "baz")
-*** Exception: InvalidPrefix {prefix = "foo", pathToStrip = "fob/baz"}
+*** Exception: InvalidPrefix {prefix = "foo/", pathToStrip = "fob/baz"}
 
 >>> replacePrefix (root </> dir "foo") (dir "..") (root </> dir "foo" </> dir "bar")
 dir ".." </> dir "bar"
