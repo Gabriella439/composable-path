@@ -79,8 +79,8 @@ import qualified System.FilePath as FilePath
 
     You can build a `Path` using the following primitive operations:
 
-    - `id` creates an empty `Path` (with 0 path components)
-    - `root` create an empty `Path` (with 0 path components) anchored at the
+    - `id` creates an empty `Path` (with zero path components)
+    - `root` create an empty `Path` (with zero path components) anchored at the
       root of the filesystem
     - `dir` creates a `Path` with one path component representing a directory
     - `file` creates a `Path` with one path component representing a file
@@ -200,7 +200,7 @@ file component = PathFile PathId component
 -}
 toFilePath :: Path a b -> FilePath
 toFilePath PathId = ""
-toFilePath PathRoot = "/"
+toFilePath PathRoot = [ FilePath.pathSeparator ]
 toFilePath (PathDir parent component) =
     toFilePath parent FilePath.</> (component <> [ FilePath.pathSeparator ])
 toFilePath (PathFile parent component) =
