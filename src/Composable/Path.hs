@@ -7,7 +7,13 @@
 {-# LANGUAGE QuasiQuotes           #-}
 {-# LANGUAGE RecordWildCards       #-}
 
-{-# OPTIONS_GHC -Wall #-}
+{-| This module provides a `Path` type that is well-typed, meaning that you
+    can tell from the type of the `Path` whether it is a file or directory
+    and also whether it is a relative path or absolute path.
+
+    Additionally, this `Path` type is composable, meaning that you can combine
+    `Path`s using the `Category` instance for `Path`.
+-}
 
 module Composable.Path
     (
@@ -28,7 +34,6 @@ module Composable.Path
 
     -- * Prefixes
     , stripPrefix
-    , replacePrefix
     , isPrefixOf
 
     -- * Exceptions
@@ -41,6 +46,7 @@ module Composable.Path
     , (<<<)
     ) where
 
+import Control.Applicative (Alternative(..))
 import Control.Category (Category(..), (<<<), (>>>))
 import Control.Exception (Exception(..))
 import Control.Monad.Catch (MonadThrow(..))
@@ -277,6 +283,9 @@ dir "baz"
 basename :: MonadThrow m => Path a b -> m (Path 'Dir b)
 basename path = fmap snd (split path)
 
+{-| This exception is thrown when a `Path` is not a valid prefix of another
+    `Path`
+-}
 data InvalidPrefix = InvalidPrefix
     { prefix :: FilePath
     , pathToStrip :: FilePath
@@ -297,6 +306,28 @@ instance Exception InvalidPrefix where
 `stripPrefix` `id` = `pure` `id`
 `stripPrefix` (f `.` g) = liftA2 (.) (`stripPrefix` f) (`stripPrefix` g)
 @
+
+>>> stripPrefix root root
+id
+>>> stripPrefix (dir "foo") (dir "foo")
+id
+>>> stripPrefix (file "foo") (file "foo")
+id
+
+>>> stripPrefix root (root </> dir "foo")
+dir "foo"
+>>> stripPrefix (root </> dir "foo") (root </> dir "foo" </> file "bar")
+file "bar"
+>>> stripPrefix (dir "foo") (dir "foo" </> dir "bar" </> dir "baz")
+dir "bar" </> dir "baz"
+
+>>> stripPrefix (dir "foo") (file "foo")
+*** Exception: InvalidPrefix {prefix = "foo", pathToStrip = "foo"}
+
+ghci> stripPrefix (dir "foo") (dir "bar")
+*** Exception: InvalidPrefix {prefix = "foo", pathToStrip = "bar"}
+ghci> stripPrefix (dir "foo" </> dir "bar") (dir "foo" </> dir "baz")
+*** Exception: InvalidPrefix {prefix = "foo/bar", pathToStrip = "foo/baz"}
 -}
 stripPrefix :: MonadThrow m => Path a b -> Path a c -> m (Path b c)
 stripPrefix prefix pathToStrip = case prefix of
@@ -309,27 +340,63 @@ stripPrefix prefix pathToStrip = case prefix of
             PathRoot -> do
                 pure PathId
             PathDir parent_ component -> do
-                newParent <- stripPrefix PathRoot parent_
+                newParent <- stripPrefix prefix parent_
                 pure (PathDir newParent component)
             PathFile parent_ component -> do
-                newParent <- stripPrefix PathRoot parent_
+                newParent <- stripPrefix prefix parent_
                 pure (PathFile newParent component)
     PathDir parentL componentL ->
-        case pathToStrip of
-            PathDir parentR componentR
-                | componentL == componentR -> do
-                    _ <- stripPrefix parentL parentR
-                    return PathId
-            _ -> do
-                Catch.throwM invalidPrefix
+        case alternative0 <|> alternative1 of
+            Just suffix -> pure suffix
+            Nothing -> Catch.throwM invalidPrefix
+      where
+        alternative0 =
+            case pathToStrip of
+                PathDir parentR componentR
+                    | componentL == componentR -> do
+                        _ <- stripPrefix parentL parentR
+                        pure PathId
+                _ ->
+                    empty
+
+        alternative1 = do
+            case pathToStrip of
+                PathId -> do
+                    empty
+                PathRoot -> do
+                    empty
+                PathDir parentR componentR -> do
+                    newParent <- stripPrefix prefix parentR
+                    pure (PathDir newParent componentR)
+                PathFile parentR componentR -> do
+                    newParent <- stripPrefix prefix parentR
+                    pure (PathFile newParent componentR)
     PathFile parentL componentL ->
-        case pathToStrip of
-            PathFile parentR componentR
-                | componentL == componentR -> do
-                    _ <- stripPrefix parentL parentR
-                    return PathId
-            _ -> do
-                Catch.throwM invalidPrefix
+        case alternative0 <|> alternative1 of
+            Just suffix -> pure suffix
+            Nothing -> Catch.throwM invalidPrefix
+      where
+        alternative0 =
+            case pathToStrip of
+                PathFile parentR componentR
+                    | componentL == componentR -> do
+                        _ <- stripPrefix parentL parentR
+                        pure PathId
+                _ ->
+                    empty
+
+        alternative1 = do
+            case pathToStrip of
+                PathId -> do
+                    empty
+                PathRoot -> do
+                    empty
+                PathDir parentR componentR -> do
+                    newParent <- stripPrefix prefix parentR
+                    pure (PathDir newParent componentR)
+                PathFile parentR componentR -> do
+                    newParent <- stripPrefix prefix parentR
+                    pure (PathFile newParent componentR)
   where
     invalidPrefix = InvalidPrefix
         { prefix = toFilePath prefix
@@ -344,9 +411,3 @@ stripPrefix prefix pathToStrip = case prefix of
 -}
 isPrefixOf :: Path a b -> Path a c -> Bool
 isPrefixOf prefix path = isJust (stripPrefix prefix path)
-
-replacePrefix
-    :: MonadThrow m => Path a b -> Path a b -> Path a c -> m (Path a c)
-replacePrefix oldPrefix newPrefix pathToStrip = do
-    suffix <- stripPrefix oldPrefix pathToStrip
-    pure (newPrefix </> suffix)
