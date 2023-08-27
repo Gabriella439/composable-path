@@ -36,6 +36,11 @@ module Composable.Path
     , stripPrefix
     , isPrefixOf
 
+    -- * Extensions
+    , splitExtensions
+    , extensions
+    , dropExtensions
+
     -- * Exceptions
     , EmptyPath(..)
     , InvalidPrefix(..)
@@ -55,6 +60,7 @@ import Data.String.Interpolate (__i)
 import Prelude hiding ((.), id)
 
 import qualified Control.Monad.Catch as Catch
+import qualified Data.List as List
 import qualified System.FilePath as FilePath
 
 {-| A well-typed path whose type parameters indicate what type of path it is:
@@ -413,3 +419,50 @@ stripPrefix prefix pathToStrip = case prefix of
 -}
 isPrefixOf :: Path a b -> Path a c -> Bool
 isPrefixOf prefix path = isJust (stripPrefix prefix path)
+
+{-| Separate out the extensions from a `Path`, returning the original
+    path minus extensions and then list of extensions
+
+>>> splitExtensions (file "foo.tar.gz")
+(file "foo",["tar","gz"])
+>>> splitExtensions id
+(id,[])
+>>> splitExtensions (root </> dir "foo" </> file "bar.tar.gz")
+(root </> dir "foo" </> file "bar",["tar","gz"])
+-}
+splitExtensions :: Path a 'File -> (Path a 'File, [String])
+splitExtensions PathId = (PathId, [])
+splitExtensions (PathFile parent_ component) =
+    (PathFile parent_ prefix0, extensions0)
+  where
+    (prefix0, suffix0) = List.break (== '.') component
+
+    extensions0 = case suffix0 of
+        ""         -> [ ]
+        _ : suffix -> loop suffix
+
+    loop suffix1 = prefix : extensions_
+      where
+        (prefix, suffix2) = List.break (== '.') suffix1
+
+        extensions_ = case suffix2 of
+            ""          -> []
+            _ : suffix3 -> loop suffix3
+
+{-| Return the list of extensions for a `Path`
+
+@
+'extensions' path = 'snd' ('splitExtensions' path)
+@
+-}
+extensions :: Path a 'File -> [String]
+extensions path = snd (splitExtensions path)
+
+{-| Strip the extensions from a `Path`
+
+@
+'dropExtensions' path = 'fst' ('dropExtensions' path)
+@
+-}
+dropExtensions :: Path a 'File -> Path a 'File
+dropExtensions path = fst (splitExtensions path)
