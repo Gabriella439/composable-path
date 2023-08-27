@@ -23,6 +23,9 @@ module Composable.Path
     -- * Types
       Path
     , Node(..)
+    , APathFrom(..)
+    , APathTo(..)
+    , APath(..)
 
     -- * Construction
     , root
@@ -189,6 +192,31 @@ instance Show (Path a b) where
             . showsPrec 10 component
             )
 
+-- | A path which can be either a directory or a file
+data APathFrom a
+    = ADir (Path a 'Dir)
+    -- ^ A directory
+    | AFile (Path a 'File)
+    -- ^ A file
+
+-- | A path which can be either an absolute path or relative path
+data APathTo b
+    = Absolute (Path 'Root b)
+    -- ^ An absolute path
+    | Relative (Path 'Dir b)
+    -- ^ A relative path
+
+-- | A directory or file which can be either an absolute path or relative path
+data APath
+    = AbsoluteDir (Path 'Root 'Dir)
+    -- ^ An absolute path to a directory
+    | AbsoluteFile (Path 'Root 'File)
+    -- ^ An absolute path to a file
+    | RelativeDir (Path 'Dir 'Dir)
+    -- ^ A relative path to a directory
+    | RelativeFile (Path 'Dir 'File)
+    -- ^ A relative path to a file
+
 -- | The root of the filesystem
 root :: Path 'Root 'Dir
 root = PathRoot
@@ -288,69 +316,105 @@ root
 class ParsePath path where
     parse :: MonadThrow m => FilePath -> m path
 
+instance ParsePath APath  where
+    parse filepath = do
+        let (absolute, nonEmpty) =
+                case filepathComponents filepath of
+                    "" :| component : components ->
+                        (True, component :| components)
+                    components ->
+                        (False, components)
+
+        let directories = NonEmpty.init nonEmpty
+
+        let file_ = NonEmpty.last nonEmpty
+
+        if absolute then
+            if file_ == "" then do
+                pure (AbsoluteDir (root </> foldr (</>) id (map dir directories)))
+            else do
+                pure (AbsoluteFile (root </> foldr (</>) (file file_) (map dir directories)))
+        else
+            if file_ == "" then do
+                pure (RelativeDir (foldr (</>) id (map dir directories)))
+            else do
+                pure (RelativeFile (foldr (</>) (file file_) (fmap dir directories)))
+
+instance ParsePath (APathFrom 'Root) where
+    parse filepath = do
+        aPath <- parse filepath
+
+        case aPath of
+            AbsoluteDir  path -> pure (ADir path)
+            AbsoluteFile path -> pure (AFile path)
+            _                   -> Catch.throwM noLeadingSeparator
+
+instance ParsePath (APathFrom 'Dir) where
+    parse filepath = do
+        aPath <- parse filepath
+
+        case aPath of
+            RelativeDir  path -> pure (ADir path)
+            RelativeFile path -> pure (AFile path)
+            _                 -> Catch.throwM unexpectedLeadingSeparator
+
+instance ParsePath (APathTo 'Dir) where
+    parse filepath = do
+        aPath <- parse filepath
+
+        case aPath of
+            AbsoluteDir path -> pure (Absolute path)
+            RelativeDir path -> pure (Relative path)
+            _                -> Catch.throwM noTrailingSeparator
+
+instance ParsePath (APathTo 'File) where
+    parse filepath = do
+        aPath <- parse filepath
+
+        case aPath of
+            AbsoluteFile path -> pure (Absolute path)
+            RelativeFile path -> pure (Relative path)
+            _                 -> Catch.throwM unexpectedTrailingSeparator
+
 instance ParsePath (Path 'Root 'Dir) where
-    parse filepath =
-        case filepathComponents filepath of
-            "" :| component : components -> do
-                let nonEmpty = component :| components
+    parse filepath = do
+        aPath <- parse filepath
 
-                let directories = NonEmpty.init nonEmpty
-
-                if NonEmpty.last nonEmpty == ""
-                    then do
-                        pure (root </> foldr (</>) id (map dir directories))
-                    else do
-                        Catch.throwM noTrailingSeparator
-            _ -> do
-                Catch.throwM noLeadingSeparator
+        case aPath of
+            AbsoluteDir  path -> pure path
+            AbsoluteFile _    -> Catch.throwM noTrailingSeparator
+            RelativeDir  _    -> Catch.throwM noLeadingSeparator
+            RelativeFile _    -> Catch.throwM noLeadingSeparator
 
 instance ParsePath (Path 'Root 'File) where
-    parse filepath =
-        case filepathComponents filepath of
-            "" :| component : components -> do
-                let nonEmpty = component :| components
+    parse filepath = do
+        aPath <- parse filepath
 
-                let directories = NonEmpty.init nonEmpty
-
-                let file_ = NonEmpty.last nonEmpty
-
-                if file_ == ""
-                    then do
-                        Catch.throwM unexpectedTrailingSeparator
-                    else do
-                        pure (root </> foldr (</>) (file file_) (map dir directories))
-            _ -> do
-                Catch.throwM noLeadingSeparator
+        case aPath of
+            AbsoluteDir  _    -> Catch.throwM unexpectedTrailingSeparator
+            AbsoluteFile path -> pure path
+            RelativeDir  _    -> Catch.throwM noLeadingSeparator
+            RelativeFile _    -> Catch.throwM noLeadingSeparator
 
 instance ParsePath (Path 'Dir 'Dir) where
-    parse filepath =
-        case filepathComponents filepath of
-            "" :| _ -> do
-                Catch.throwM unexpectedLeadingSeparator
-            components -> do
-                let directories = NonEmpty.init components
+    parse filepath = do
+        aPath <- parse filepath
 
-                if NonEmpty.last components == ""
-                    then do
-                        pure (foldr (</>) id (map dir directories))
-                    else do
-                        Catch.throwM noTrailingSeparator
+        case aPath of
+            AbsoluteDir  _    -> Catch.throwM unexpectedLeadingSeparator
+            AbsoluteFile _    -> Catch.throwM unexpectedLeadingSeparator
+            RelativeDir  path -> pure path
+            RelativeFile _    -> Catch.throwM noTrailingSeparator
 
 instance ParsePath (Path 'Dir 'File) where
-    parse filepath =
-        case filepathComponents filepath of
-            "" :| _ -> do
-                Catch.throwM unexpectedLeadingSeparator
-            components -> do
-                let directories = NonEmpty.init components
+    parse filepath = do
+        aPath <- parse filepath
 
-                let file_ = NonEmpty.last components
-
-                if file_ == ""
-                    then do
-                        Catch.throwM unexpectedTrailingSeparator
-                    else do
-                        pure (foldr (</>) (file file_) (fmap dir directories))
+        case aPath of
+            AbsoluteDir  _    -> Catch.throwM unexpectedLeadingSeparator
+            AbsoluteFile _    -> Catch.throwM unexpectedLeadingSeparator
+            RelativeDir   _    -> Catch.throwM unexpectedTrailingSeparator
+            RelativeFile  path -> pure path
 
 instance ParsePath (Path 'File 'File) where
     parse "" = pure PathId
@@ -420,8 +484,10 @@ filepathComponents filepath =
 "foo/bar/baz/"
 -}
 toFilePath :: Path a b -> FilePath
-toFilePath PathId = ""
-toFilePath PathRoot = [ FilePath.pathSeparator ]
+toFilePath PathId =
+    ""
+toFilePath PathRoot =
+    [ FilePath.pathSeparator ]
 toFilePath (PathDir parent component) =
     toFilePath parent FilePath.</> (component <> [ FilePath.pathSeparator ])
 toFilePath (PathFile parent component) =
