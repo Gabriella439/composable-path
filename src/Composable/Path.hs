@@ -10,24 +10,30 @@
 {-# OPTIONS_GHC -Wall #-}
 
 module Composable.Path
-    ( Path
+    (
+    -- * Types
+      Path
+    , Node(..)
+
     -- * Construction
     , root
     , dir
     , file
-    -- * Operations
-    , stripProperPrefix
-    , replaceProperPrefix
-    , isProperPrefixOf
-    , parent
-    , filename
-    , dirname
     , (</>)
 
+    -- * Splitting
+    , split
+    , parent
+    , basename
+
+    -- * Prefixes
+    , stripPrefix
+    , replacePrefix
+    , isPrefixOf
+
     -- * Exceptions
+    , EmptyPath(..)
     , InvalidPrefix(..)
-    , InvalidParent(..)
-    , InvalidFilename(..)
 
     -- * Re-exports
     , Category(..)
@@ -38,19 +44,69 @@ module Composable.Path
 import Control.Category (Category(..), (<<<), (>>>))
 import Control.Exception (Exception(..))
 import Control.Monad.Catch (MonadThrow(..))
+import Data.Maybe (isJust)
 import Data.String.Interpolate (__i)
 import Prelude hiding ((.), id)
 
 import qualified Control.Monad.Catch as Catch
 import qualified System.FilePath as FilePath
 
-data Node = Root | Dir | File
+{-| A well-typed path whose type parameters indicate what type of path it is:
 
+@
+'Path' 'Root' 'Dir'   -- The type of an absolute path to a directory
+'Path' 'Root' 'File'  -- The type of an absolute path to a file
+'Path' 'Dir'  'Dir'   -- The type of a relative path to a directory
+'Path' 'Dir'  'File'  -- The type of a relative path to a file
+@
+
+    You can build a `Path` using the following primitive operations:
+
+    - `id` creates an empty `Path` (with 0 path components)
+    - `root` create an empty `Path` (with 0 path components) anchored at the
+      root of the filesystem
+    - `dir` creates a `Path` with one path component representing a directory
+    - `file` creates a `Path` with one path component representing a file
+
+    … and you can combine those primitive `Path`s using (`</>`) to create
+    longer `Path`s, like this:
+
+    >>> root </> dir "foo" </> file "bar"
+    root </> dir "foo" </> file "bar"
+    >>> :type it
+    it :: Path 'Root 'File
+    >>> toFilePath it
+    "/foo/bar"
+
+    >>> dir "foo" </> dir "bar" </> dir "baz"
+    dir "foo" </> dir "bar" </> dir "baz"
+    >>> :type it
+    it :: Path 'Dir 'Dir
+    >>> toFilePath it
+    "foo/bar/baz"
+
+    As the above examples show, you can use `toFilePath` to convert a `Path`
+    back into a `FilePath`.
+-}
 data Path (a :: Node) (b :: Node) where
     PathId :: Path a a
     PathRoot :: Path 'Root 'Dir
     PathDir :: Path a 'Dir -> FilePath -> Path a 'Dir
     PathFile :: Path a 'Dir -> FilePath -> Path a 'File
+
+{-| All path components have two type parameters, both of which are `Node`s
+
+    These `Node` type parameters represent where a path component \"begins\"
+    and \"ends\".
+-}
+data Node
+    = Root
+    -- ^ The first type parameter for an absolute path
+    | Dir
+    -- ^ The first type parameter for a relative path and the second type
+    --   parameter for a directory
+    | File
+    -- ^ The second type parameter for a file
 
 instance Category Path where
     id = PathId
@@ -66,20 +122,57 @@ instance Category Path where
     path . PathId = path
 
 instance Show (Path a b) where
-    show path = show (toFilePath path)
+    showsPrec _ PathId = showString "id"
+    showsPrec _ PathRoot = showString "root"
+    showsPrec precedence (PathDir PathId component) =
+        showParen (precedence > 10) (showString "dir " . showsPrec 10 component)
+    showsPrec precedence (PathDir parent_ component) =
+        showParen (precedence > 1)
+            ( showsPrec 1 parent_
+            . showString " </> dir "
+            . showsPrec 10 component
+            )
+    showsPrec precedence (PathFile PathId component) =
+        showParen (precedence > 10) (showString "file " . showsPrec 10 component)
+    showsPrec precedence (PathFile parent_ component) =
+        showParen (precedence > 1)
+            ( showsPrec 1 parent_
+            . showString " </> file "
+            . showsPrec 10 component
+            )
 
+-- | Combine two paths
 (</>) :: Path a b -> Path b c -> Path a c
 (</>) = (>>>)
 
+-- | The root of the filesystem
 root :: Path 'Root 'Dir
 root = PathRoot
 
+-- | A path component that is a directory
 dir :: FilePath -> Path 'Dir 'Dir
 dir component = PathDir PathId component
 
+-- | A path component that is a file
 file :: FilePath -> Path 'Dir 'File
 file component = PathFile PathId component
 
+{-| Convert a `Path` to a `FilePath`
+
+>>> toFilePath (file "foo")
+"foo"
+>>> toFilePath (dir "foo")
+"foo"
+>>> toFilePath root
+"/"
+>>> toFilePath id
+""
+
+>>> toFilePath (root </> dir "foo" </> file "bar")
+"/foo/bar"
+>>> toFilePath (dir "foo" </> dir "bar" </> dir "baz")
+"foo/bar/baz"
+-}
 toFilePath :: Path a b -> FilePath
 toFilePath PathId = ""
 toFilePath PathRoot = "/"
@@ -88,13 +181,102 @@ toFilePath (PathDir parent_ component) =
 toFilePath (PathFile parent_ component) =
     toFilePath parent_ FilePath.</> component
 
--- toFilePath (pathL </> pathR) = toFilePath pathL </> toFilePath pathR
--- toFilePath id = theIdentityFilePath
---
--- theIdentityFilePath </> (path :: FilePath) = path
--- theIdentityFilePath = ""
+{-| This exception is thrown by operations that only supports non-empty
+    paths when given an empty path
+-}
+data EmptyPath = EmptyPath
+    { path :: FilePath
+    } deriving (Show)
 
--- TODO: Use Path here
+instance Exception EmptyPath where
+    displayException EmptyPath{..} =
+        [__i|
+        Empty path
+
+        path: #{path}
+        |]
+
+{-| `split` splits a non-empty `Path` into its `parent` path and its
+    `basename`s
+
+    The first part of the result is everything except the last path component
+    and the second part of the result is the last path component.
+
+    This throws an `EmptyPath` exception if the path has no path components.
+
+>>> split (file "foo")
+(id,file "foo")
+>>> split (dir "foo")
+(id,dir "foo")
+>>> split id
+*** Exception: EmptyPath {path = ""}
+>>> split root
+*** Exception: EmptyPath {path = "/"}
+
+>>> split (root </> dir "foo" </> file "bar")
+(root </> dir "foo",file "bar")
+>>> split (dir "foo" </> dir "bar" </> dir "baz")
+(dir "foo" </> dir "bar",dir "baz")
+-}
+split :: MonadThrow m => Path a c -> m (Path a 'Dir, Path 'Dir c)
+split path = case path of
+    PathId -> Catch.throwM emptyPath
+    PathRoot -> Catch.throwM emptyPath
+    PathDir parent_ component -> pure (parent_, dir component)
+    PathFile parent_ component -> pure (parent_, file component)
+  where
+    emptyPath = EmptyPath{ path = toFilePath path }
+
+{-| `parent` drops the last path component of a `Path`
+
+@
+'parent' path = 'fmap' 'fst' ('split' path)
+@
+
+    This throws an `EmptyPath` exception if the path has no path components.
+
+>>> parent (file "foo")
+id
+>>> parent (dir "foo")
+id
+>>> parent id
+*** Exception: EmptyPath {path = ""}
+>>> parent root
+*** Exception: EmptyPath {path = "/"}
+
+>>> parent (root </> dir "foo" </> file "bar")
+root </> dir "foo"
+>>> parent (dir "foo" </> dir "bar" </> dir "baz") 
+dir "foo" </> dir "bar"
+-}
+parent :: MonadThrow m => Path a c -> m (Path a 'Dir)
+parent path = fmap fst (split path)
+
+{-| `basename` returns the last path component of a `Path`
+
+@
+'basename' path = 'fmap' 'snd' ('split' path)
+@
+
+    This throws an `EmptyPath` exception if the path has no path components.
+
+>>> basename (file "foo")
+file "foo"
+>>> basename (dir "foo")
+dir "foo"
+>>> basename id
+*** Exception: EmptyPath {path = ""}
+>>> basename root
+*** Exception: EmptyPath {path = "/"}
+
+>>> basename (root </> dir "foo" </> file "bar")
+file "bar"
+>>> basename (dir "foo" </> dir "bar" </> dir "baz")
+dir "baz"
+-}
+basename :: MonadThrow m => Path a b -> m (Path 'Dir b)
+basename path = fmap snd (split path)
+
 data InvalidPrefix = InvalidPrefix
     { prefix :: FilePath
     , pathToStrip :: FilePath
@@ -103,14 +285,21 @@ data InvalidPrefix = InvalidPrefix
 instance Exception InvalidPrefix where
     displayException InvalidPrefix{..} =
         [__i|
-        stripProperPrefix: invalid prefix
+        Invalid prefix
 
         prefix       : #{prefix}
         path to strip: #{pathToStrip}
         |]
 
-stripProperPrefix :: MonadThrow m => Path a b -> Path a c -> m (Path b c)
-stripProperPrefix prefix pathToStrip = case prefix of
+{-| Strip a `Path` prefix from another `Path`
+
+@
+`stripPrefix` `id` = `pure` `id`
+`stripPrefix` (f `.` g) = liftA2 (.) (`stripPrefix` f) (`stripPrefix` g)
+@
+-}
+stripPrefix :: MonadThrow m => Path a b -> Path a c -> m (Path b c)
+stripPrefix prefix pathToStrip = case prefix of
     PathId ->
         pure pathToStrip
     PathRoot ->
@@ -120,16 +309,16 @@ stripProperPrefix prefix pathToStrip = case prefix of
             PathRoot -> do
                 pure PathId
             PathDir parent_ component -> do
-                newParent <- stripProperPrefix PathRoot parent_
+                newParent <- stripPrefix PathRoot parent_
                 pure (PathDir newParent component)
             PathFile parent_ component -> do
-                newParent <- stripProperPrefix PathRoot parent_
+                newParent <- stripPrefix PathRoot parent_
                 pure (PathFile newParent component)
     PathDir parentL componentL ->
         case pathToStrip of
             PathDir parentR componentR
                 | componentL == componentR -> do
-                    _ <- stripProperPrefix parentL parentR
+                    _ <- stripPrefix parentL parentR
                     return PathId
             _ -> do
                 Catch.throwM invalidPrefix
@@ -137,7 +326,7 @@ stripProperPrefix prefix pathToStrip = case prefix of
         case pathToStrip of
             PathFile parentR componentR
                 | componentL == componentR -> do
-                    _ <- stripProperPrefix parentL parentR
+                    _ <- stripPrefix parentL parentR
                     return PathId
             _ -> do
                 Catch.throwM invalidPrefix
@@ -147,74 +336,17 @@ stripProperPrefix prefix pathToStrip = case prefix of
         , pathToStrip = toFilePath pathToStrip
         }
 
-isProperPrefixOf :: Path a b -> Path a c -> Bool
-isProperPrefixOf prefix pathToStrip =
-    case stripProperPrefix prefix pathToStrip of
-        Nothing -> False
-        Just _  -> True
+{-| Check to see if one `Path` is a prefix of another `Path`
 
-replaceProperPrefix
+@
+'isPrefixOf' prefix path = 'isJust' ('stripPrefix' prefix path)
+@
+-}
+isPrefixOf :: Path a b -> Path a c -> Bool
+isPrefixOf prefix path = isJust (stripPrefix prefix path)
+
+replacePrefix
     :: MonadThrow m => Path a b -> Path a b -> Path a c -> m (Path a c)
-replaceProperPrefix oldPrefix newPrefix pathToStrip = do
-    suffix <- stripProperPrefix oldPrefix pathToStrip
+replacePrefix oldPrefix newPrefix pathToStrip = do
+    suffix <- stripPrefix oldPrefix pathToStrip
     pure (newPrefix </> suffix)
-
-data InvalidParent = InvalidParent
-    { path :: FilePath
-    } deriving (Show)
-
-instance Exception InvalidParent where
-    displayException InvalidParent{..} =
-        [__i|
-        parent: invalid parent
-
-        path: #{path}
-        |]
-
-parent :: MonadThrow m => Path a b -> m (Path a 'Dir)
-parent path = case path of
-    PathId -> Catch.throwM invalidParent
-    PathRoot -> Catch.throwM invalidParent
-    PathDir parent_ _ -> pure parent_
-    PathFile parent_ _ -> pure parent_
-  where
-    invalidParent = InvalidParent{ path = toFilePath path }
-
-data InvalidFilename = InvalidFilename
-    { path :: FilePath
-    } deriving (Show)
-
-instance Exception InvalidFilename where
-    displayException InvalidFilename{..} =
-        [__i|
-        filename: invalid filename
-
-        path: #{path}
-        |]
-
-filename :: MonadThrow m => Path a 'File -> m (Path 'Dir 'File)
-filename path = case path of
-    PathId -> Catch.throwM invalidFilename
-    PathFile _ component -> pure (file component)
-  where
-    invalidFilename = InvalidFilename{ path = toFilePath path }
-
-data InvalidDirname = InvalidDirname
-    { path :: FilePath
-    } deriving (Show)
-
-instance Exception InvalidDirname where
-    displayException InvalidDirname{..} =
-        [__i|
-        filename: invalid filename
-
-        path: #{path}
-        |]
-
-dirname :: MonadThrow m => Path a 'Dir -> m (Path 'Dir 'Dir)
-dirname path = case path of
-    PathId -> Catch.throwM invalidDirname
-    PathRoot -> Catch.throwM invalidDirname
-    PathDir _ component -> pure (dir component)
-  where
-    invalidDirname = InvalidDirname{ path = toFilePath path }
