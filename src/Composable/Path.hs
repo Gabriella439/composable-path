@@ -32,6 +32,8 @@ module Composable.Path
     , dir
     , file
     , (</>)
+    , (</)
+    , (/>)
     , ParsePath(..)
 
     -- * Elimination
@@ -234,6 +236,30 @@ file component = PathFile PathId component
 (</>) = (>>>)
 
 infixl 5 </>
+
+{-| Like (`</>`), except the left argument is `APathTo`
+
+@
+x '/>' 'id' = x
+
+x '/>' (y '</>' z) = (x '/>' y) '/>' z
+@
+-}
+(/>) :: APathTo b -> Path b c -> APathTo c
+Absolute x /> y = Absolute (x </> y)
+Relative x /> y = Relative (x </> y)
+
+{-| Like (`</>`), except that the right argument is `APathFrom`
+
+@
+id '</' x = x
+
+(x '</>' y) '</' z = x '</' (y '</' z)
+@
+-}
+(</) :: Path a b -> APathFrom b -> APathFrom a
+x </ AFile y = AFile (x </> y)
+x </ ADir  y = ADir  (x </> y)
 
 -- | This exception is thrown when failing to parse a `Path`
 data ParseFailure = ParseFailure
