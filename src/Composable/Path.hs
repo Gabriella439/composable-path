@@ -40,28 +40,56 @@ module Composable.Path
     , toFilePath
 
     -- * Splitting
-    , split
-    , dirname
-    , basename
+    , splitBaseName
+    , takeBaseName
+    , dropBaseName
+    , addBaseName
+    , replaceBaseName
+    , hasBaseName
+    -- ** Synonyms
+    , baseName
+    , dirName
+    , stripBaseName
+    , isBaseNameOf
 
-    -- * Prefixes and Suffixes
+    -- * Prefixes
+    , dropPrefix
+    , addPrefix
+    , replacePrefix
+    , hasPrefix
+    -- ** Synonyms
     , stripPrefix
     , isPrefixOf
-    , replacePrefix
+
+    -- * Suffixes
+    , dropSuffix
+    , addSuffix
+    , replaceSuffix
+    , hasSuffix
+    -- ** Synonyms
     , stripSuffix
     , isSuffixOf
-    , replaceSuffix
 
     -- * Extensions
     , splitExtension
     , splitExtensions
-    , extension
-    , extensions
+    , takeExtension
+    , takeExtensions
     , dropExtension
     , dropExtensions
     , addExtension
     , addExtensions
+    , replaceExtension
+    , replaceExtensions
     , hasExtension
+    , hasExtensions
+    -- * Synonyms
+    , extension
+    , extensions
+    , stripExtension
+    , stripExtensions
+    , isExtensionOf
+    , areExtensionsOf
 
     -- * Exceptions
     , EmptyPath(..)
@@ -534,7 +562,7 @@ instance Exception EmptyPath where
         path: #{path}
         |]
 
-{-| `split` splits a non-empty `Path` into its `dirname` and `basename`.
+{-| `splitBaseName` splits a non-empty `Path` into its `dirName` and `baseName`.
 
     This is analogous to @"System.FilePath".`FilePath.splitFileName`@.
 
@@ -543,22 +571,22 @@ instance Exception EmptyPath where
 
     This throws an `EmptyPath` exception if the path has no path components.
 
->>> split (file "foo")
+>>> splitBaseName (file "foo")
 (id,file "foo")
->>> split (dir "foo")
+>>> splitBaseName (dir "foo")
 (id,dir "foo")
->>> split id
+>>> splitBaseName id
 *** Exception: EmptyPath {path = ""}
->>> split root
+>>> splitBaseName root
 *** Exception: EmptyPath {path = "/"}
 
->>> split (root </> dir "foo" </> file "bar")
+>>> splitBaseName (root </> dir "foo" </> file "bar")
 (root </> dir "foo",file "bar")
->>> split (dir "foo" </> dir "bar" </> dir "baz")
+>>> splitBaseName (dir "foo" </> dir "bar" </> dir "baz")
 (dir "foo" </> dir "bar",dir "baz")
 -}
-split :: MonadThrow m => Path a c -> m (Path a 'Dir, Path 'Dir c)
-split path = case path of
+splitBaseName :: MonadThrow m => Path a c -> m (Path a 'Dir, Path 'Dir c)
+splitBaseName path = case path of
     PathId -> Catch.throwM emptyPath
     PathRoot -> Catch.throwM emptyPath
     PathDir parent component -> pure (parent, dir component)
@@ -566,38 +594,11 @@ split path = case path of
   where
     emptyPath = EmptyPath{ path = toFilePath path }
 
-{-| `dirname` drops the last path component of a `Path`
-
-    This is analogous to @"System.FilePath".`FilePath.takeDirectory`@.
-
-@
-'dirname' path = 'fmap' 'fst' ('split' path)
-@
-
-    This throws an `EmptyPath` exception if the path has no path components.
-
->>> dirname (file "foo")
-id
->>> dirname (dir "foo")
-id
->>> dirname id
-*** Exception: EmptyPath {path = ""}
->>> dirname root
-*** Exception: EmptyPath {path = "/"}
-
->>> dirname (root </> dir "foo" </> file "bar")
-root </> dir "foo"
->>> dirname (dir "foo" </> dir "bar" </> dir "baz") 
-dir "foo" </> dir "bar"
--}
-dirname :: MonadThrow m => Path a c -> m (Path a 'Dir)
-dirname path = fmap fst (split path)
-
-{-| `basename` returns the last path component of a `Path`
+{-| `takeBaseName` returns the last path component of a `Path`
 
     __Carefully note:__ This does not behave the same as
     @"System.FilePath".`FilePath.takeBaseName`@, which returns the last path
-    component minus any extensions.  This `basename` utility preserves all
+    component minus any extensions.  This `takeBaseName` utility preserves all
     extensions and corresponds more closely to
     @"System.FilePath".`FilePath.takeFileName`@.  The reason for not following
     the same naming convention is because:
@@ -608,27 +609,92 @@ dirname path = fmap fst (split path)
       typically refers to the entirety of the last path component)
 
 @
-'basename' path = 'fmap' 'snd' ('split' path)
+'takeBaseName' path = 'fmap' 'snd' ('splitBaseName' path)
 @
 
     This throws an `EmptyPath` exception if the path has no path components.
 
->>> basename (file "foo")
+>>> takeBaseName (file "foo")
 file "foo"
->>> basename (dir "foo")
+>>> takeBaseName (dir "foo")
 dir "foo"
->>> basename id
+>>> takeBaseName id
 *** Exception: EmptyPath {path = ""}
->>> basename root
+>>> takeBaseName root
 *** Exception: EmptyPath {path = "/"}
 
->>> basename (root </> dir "foo" </> file "bar")
+>>> takeBaseName (root </> dir "foo" </> file "bar")
 file "bar"
->>> basename (dir "foo" </> dir "bar" </> dir "baz")
+>>> takeBaseName (dir "foo" </> dir "bar" </> dir "baz")
 dir "baz"
 -}
-basename :: MonadThrow m => Path a b -> m (Path 'Dir b)
-basename path = fmap snd (split path)
+takeBaseName :: MonadThrow m => Path a b -> m (Path 'Dir b)
+takeBaseName path = fmap snd (splitBaseName path)
+
+{-| `dropBaseName` drops the last path component of a `Path`
+
+    This is analogous to @"System.FilePath".`FilePath.takeDirectory`@.
+
+@
+'dropBaseName' path = 'fmap' 'fst' ('splitBaseName' path)
+@
+
+    This throws an `EmptyPath` exception if the path has no path components.
+
+>>> dropBaseName (file "foo")
+id
+>>> dropBaseName (dir "foo")
+id
+>>> dropBaseName id
+*** Exception: EmptyPath {path = ""}
+>>> dropBaseName root
+*** Exception: EmptyPath {path = "/"}
+
+>>> dropBaseName (root </> dir "foo" </> file "bar")
+root </> dir "foo"
+>>> dropBaseName (dir "foo" </> dir "bar" </> dir "baz") 
+dir "foo" </> dir "bar"
+-}
+dropBaseName :: MonadThrow m => Path a b -> m (Path a 'Dir)
+dropBaseName path = fmap fst (splitBaseName path)
+
+-- | Synonym for @('</>')@
+addBaseName :: Path a 'Dir -> Path 'Dir b -> Path a b
+addBaseName = (</>)
+
+{-| Replace a basename with a new one
+
+@
+'replaceBaseName' newBaseName path = 'fmap' ('</>' newBaseName) ('dropBaseName' path)
+@
+-}
+replaceBaseName :: MonadThrow m => Path 'Dir c -> Path a b -> m (Path a c)
+replaceBaseName newBaseName path = fmap (</> newBaseName) (dropBaseName path)
+
+{-| Check to see if a `Path` has a base name (i.e. the `Path` has at least one
+    path component)
+@
+'hasBaseName' path = 'isJust' ('takeBaseName' path)
+@
+-}
+hasBaseName :: Path a b -> Bool
+hasBaseName path = isJust (takeBaseName path)
+
+-- | Synonym for `takeBaseName`
+baseName :: MonadThrow m => Path a b -> m (Path 'Dir b)
+baseName = takeBaseName
+
+-- | Synonym for `dropBaseName`
+dirName :: MonadThrow m => Path a b -> m (Path a 'Dir)
+dirName = dropBaseName
+
+-- | Synonym for `dropBaseName`
+stripBaseName :: MonadThrow m => Path a b -> m (Path a 'Dir)
+stripBaseName = dropBaseName
+
+-- | Synonym for `hasBaseName`
+isBaseNameOf :: Path a b -> Bool
+isBaseNameOf = hasBaseName
 
 {-| This exception is thrown when a `Path` is not a valid prefix of another
     `Path`
@@ -647,7 +713,7 @@ instance Exception InvalidPrefix where
         path to strip: #{pathToStrip}
         |]
 
-{-| `stripPrefix` strips a `Path` prefix from another `Path`.
+{-| `dropPrefix` strips a `Path` prefix from another `Path`.
 
     This is analogous to @"System.FilePath".`FilePath.makeRelative`@.
 
@@ -655,34 +721,34 @@ instance Exception InvalidPrefix where
     prefix of the `Path` to strip.
 
 @
-`stripPrefix` `id` = `pure` `id`
+`dropPrefix` `id` = `pure` `id`
 
-`stripPrefix` (f `.` g) = liftA2 (.) (`stripPrefix` f) (`stripPrefix` g)
+`dropPrefix` (f `.` g) = liftA2 (.) (`dropPrefix` f) (`dropPrefix` g)
 @
 
->>> stripPrefix root root
+>>> dropPrefix root root
 id
->>> stripPrefix (dir "foo") (dir "foo")
+>>> dropPrefix (dir "foo") (dir "foo")
 id
->>> stripPrefix (file "foo") (file "foo")
+>>> dropPrefix (file "foo") (file "foo")
 id
 
->>> stripPrefix root (root </> dir "foo")
+>>> dropPrefix root (root </> dir "foo")
 dir "foo"
->>> stripPrefix (root </> dir "foo") (root </> dir "foo" </> file "bar")
+>>> dropPrefix (root </> dir "foo") (root </> dir "foo" </> file "bar")
 file "bar"
->>> stripPrefix (dir "foo") (dir "foo" </> dir "bar" </> dir "baz")
+>>> dropPrefix (dir "foo") (dir "foo" </> dir "bar" </> dir "baz")
 dir "bar" </> dir "baz"
 
->>> stripPrefix (dir "foo") (file "foo")
+>>> dropPrefix (dir "foo") (file "foo")
 *** Exception: InvalidPrefix {prefix = "foo/", pathToStrip = "foo"}
->>> stripPrefix (dir "foo") (dir "bar")
+>>> dropPrefix (dir "foo") (dir "bar")
 *** Exception: InvalidPrefix {prefix = "foo/", pathToStrip = "bar/"}
->>> stripPrefix (dir "foo" </> dir "bar") (dir "foo" </> dir "baz")
+>>> dropPrefix (dir "foo" </> dir "bar") (dir "foo" </> dir "baz")
 *** Exception: InvalidPrefix {prefix = "foo/bar/", pathToStrip = "foo/baz/"}
 -}
-stripPrefix :: MonadThrow m => Path a b -> Path a c -> m (Path b c)
-stripPrefix prefix pathToStrip = case prefix of
+dropPrefix :: MonadThrow m => Path a b -> Path a c -> m (Path b c)
+dropPrefix prefix pathToStrip = case prefix of
     PathId ->
         pure pathToStrip
     PathRoot ->
@@ -692,10 +758,10 @@ stripPrefix prefix pathToStrip = case prefix of
             PathRoot -> do
                 pure PathId
             PathDir parent component -> do
-                newParent <- stripPrefix prefix parent
+                newParent <- dropPrefix prefix parent
                 pure (PathDir newParent component)
             PathFile parent component -> do
-                newParent <- stripPrefix prefix parent
+                newParent <- dropPrefix prefix parent
                 pure (PathFile newParent component)
     PathDir parentL componentL ->
         case alternative0 <|> alternative1 of
@@ -706,7 +772,7 @@ stripPrefix prefix pathToStrip = case prefix of
             case pathToStrip of
                 PathDir parentR componentR
                     | componentL == componentR -> do
-                        _ <- stripPrefix parentL parentR
+                        _ <- dropPrefix parentL parentR
                         pure PathId
                 _ ->
                     empty
@@ -718,10 +784,10 @@ stripPrefix prefix pathToStrip = case prefix of
                 PathRoot -> do
                     empty
                 PathDir parentR componentR -> do
-                    newParent <- stripPrefix prefix parentR
+                    newParent <- dropPrefix prefix parentR
                     pure (PathDir newParent componentR)
                 PathFile parentR componentR -> do
-                    newParent <- stripPrefix prefix parentR
+                    newParent <- dropPrefix prefix parentR
                     pure (PathFile newParent componentR)
     PathFile parentL componentL ->
         case alternative0 <|> alternative1 of
@@ -732,7 +798,7 @@ stripPrefix prefix pathToStrip = case prefix of
             case pathToStrip of
                 PathFile parentR componentR
                     | componentL == componentR -> do
-                        _ <- stripPrefix parentL parentR
+                        _ <- dropPrefix parentL parentR
                         pure PathId
                 _ ->
                     empty
@@ -744,10 +810,10 @@ stripPrefix prefix pathToStrip = case prefix of
                 PathRoot -> do
                     empty
                 PathDir parentR componentR -> do
-                    newParent <- stripPrefix prefix parentR
+                    newParent <- dropPrefix prefix parentR
                     pure (PathDir newParent componentR)
                 PathFile parentR componentR -> do
-                    newParent <- stripPrefix prefix parentR
+                    newParent <- dropPrefix prefix parentR
                     pure (PathFile newParent componentR)
   where
     invalidPrefix = InvalidPrefix
@@ -755,40 +821,44 @@ stripPrefix prefix pathToStrip = case prefix of
         , pathToStrip = toFilePath pathToStrip
         }
 
-{-| Check to see if one `Path` is a prefix of another `Path`
-
-@
-'isPrefixOf' prefix path = 'isJust' ('stripPrefix' prefix path)
-@
--}
-isPrefixOf :: Path a b -> Path a c -> Bool
-isPrefixOf prefix path = isJust (stripPrefix prefix path)
+-- | Synonym for @(`</>`)@
+addPrefix :: Path a b -> Path b c -> Path a c
+addPrefix = (</>)
 
 {-| Replace a `Path` prefix with a new one
 
 @
 'replacePrefix' oldPrefix newPrefix path =
-    'fmap' (newPrefix '</>') ('stripPrefix' oldPrefix path)
+    'fmap' (newPrefix '</>') ('dropPrefix' oldPrefix path)
 @
 
 @
 'replacePrefix' id prefix path = 'pure' (prefix '</>' path)
 
-'replacePrefix' prefix id path = 'stripPrefix' prefix path
+'replacePrefix' prefix id path = 'dropPrefix' prefix path
 @
-
->>> replacePrefix (dir "foo") (dir "bar") (dir "foo" </> file "baz")
-dir "bar" </> file "baz"
->>> replacePrefix (dir "foo") (dir "bar") (dir "fob" </> file "baz")
-*** Exception: InvalidPrefix {prefix = "foo/", pathToStrip = "fob/baz"}
-
->>> replacePrefix (root </> dir "foo") (dir "..") (root </> dir "foo" </> dir "bar")
-dir ".." </> dir "bar"
 -}
 replacePrefix
     :: MonadThrow m => Path a c -> Path b c -> Path a d -> m (Path b d)
 replacePrefix oldPrefix newPrefix path =
-    fmap (newPrefix </>) (stripPrefix oldPrefix path)
+    fmap (newPrefix </>) (dropPrefix oldPrefix path)
+
+{-| Check to see if one `Path` is a prefix of another `Path`
+
+@
+'hasPrefix' prefix path = 'isJust' ('dropPrefix' prefix path)
+@
+-}
+hasPrefix :: Path a b -> Path a c -> Bool
+hasPrefix prefix path = isJust (dropPrefix prefix path)
+
+-- | Synonym for `dropPrefix`
+stripPrefix :: MonadThrow m => Path a b -> Path a c -> m (Path b c)
+stripPrefix = dropPrefix
+
+-- | Synonym for `hasPrefix`
+isPrefixOf :: Path a b -> Path a c -> Bool
+isPrefixOf = hasPrefix
 
 {-| This exception is thrown when a `Path` is not a valid suffix of another
     `Path`
@@ -807,40 +877,40 @@ instance Exception InvalidSuffix where
         path to strip: #{pathToStrip}
         |]
 
-{-| `stripSuffix` strips a `Path` suffix from another `Path`.
+{-| `dropSuffix` strips a `Path` suffix from another `Path`.
 
     This throws `InvalidSuffix` if the given `Path` suffix is not a valid
     suffix of the `Path` to strip.
 
 @
-`stripSuffix` `id` = `pure` `id`
+`dropSuffix` `id` = `pure` `id`
 
-`stripSuffix` (f `.` g) = liftA2 (.) (`stripSuffix` f) (`stripSuffix` g)
+`dropSuffix` (f `.` g) = liftA2 (.) (`dropSuffix` f) (`dropSuffix` g)
 @
 
->>> stripSuffix root root
+>>> dropSuffix root root
 id
->>> stripSuffix (dir "foo") (dir "foo")
+>>> dropSuffix (dir "foo") (dir "foo")
 id
->>> stripSuffix (file "foo") (file "foo")
+>>> dropSuffix (file "foo") (file "foo")
 id
 
->>> stripSuffix (dir "foo") (root </> dir "foo")
+>>> dropSuffix (dir "foo") (root </> dir "foo")
 root
->>> stripSuffix (file "bar") (root </> dir "foo" </> file "bar")
+>>> dropSuffix (file "bar") (root </> dir "foo" </> file "bar")
 root </> dir "foo"
->>> stripSuffix (dir "bar" </> dir "baz") (dir "foo" </> dir "bar" </> dir "baz")
+>>> dropSuffix (dir "bar" </> dir "baz") (dir "foo" </> dir "bar" </> dir "baz")
 dir "foo"
 
->>> stripSuffix (dir "bar" </> file "foo") (file "foo")
+>>> dropSuffix (dir "bar" </> file "foo") (file "foo")
 *** Exception: InvalidSuffix {suffix = "bar/", pathToStrip = ""}
->>> stripSuffix (dir "foo") (dir "bar")
+>>> dropSuffix (dir "foo") (dir "bar")
 *** Exception: InvalidSuffix {suffix = "foo/", pathToStrip = "bar/"}
->>> stripSuffix (dir "foo" </> dir "bar") (dir "foo" </> dir "baz")
+>>> dropSuffix (dir "foo" </> dir "bar") (dir "foo" </> dir "baz")
 *** Exception: InvalidSuffix {suffix = "foo/bar/", pathToStrip = "foo/baz/"}
 -}
-stripSuffix :: MonadThrow m => Path b c -> Path a c -> m (Path a b)
-stripSuffix suffix pathToStrip =
+dropSuffix :: MonadThrow m => Path b c -> Path a c -> m (Path a b)
+dropSuffix suffix pathToStrip =
     case suffix of
         PathId ->
             pure pathToStrip
@@ -852,14 +922,14 @@ stripSuffix suffix pathToStrip =
             case pathToStrip of
                 PathDir parentR componentR
                     | componentL == componentR ->
-                        stripSuffix parentL parentR
+                        dropSuffix parentL parentR
                 _ ->
                     Catch.throwM invalidSuffix
         PathFile parentL componentL ->
             case pathToStrip of
                 PathFile parentR componentR
                     | componentL == componentR ->
-                        stripSuffix parentL parentR
+                        dropSuffix parentL parentR
                 _ ->
                     Catch.throwM invalidSuffix
   where
@@ -868,40 +938,44 @@ stripSuffix suffix pathToStrip =
         , pathToStrip = toFilePath pathToStrip
         }
 
-{-| Check to see if one `Path` is a suffix of another `Path`
-
-@
-'isSuffixOf' suffix path = 'isJust' ('stripSuffix' suffix path)
-@
--}
-isSuffixOf :: Path b c -> Path a c -> Bool
-isSuffixOf suffix path = isJust (stripSuffix suffix path)
+-- | Synonym for @'flip' ('</>')@
+addSuffix :: Path b c -> Path a b -> Path a c
+addSuffix = flip (</>)
 
 {-| Replace a `Path` suffix with a new one
 
 @
 'replaceSuffix' oldSuffix newSuffix path =
-    'fmap' ('</>' newSuffix) ('stripSuffix' oldSuffix path)
+    'fmap' ('</>' newSuffix) ('dropSuffix' oldSuffix path)
 @
 
 @
 'replaceSuffix' id suffix path = 'pure' (path '</>' suffix)
 
-'replaceSuffix' suffix id path = 'stripSuffix' suffix path
+'replaceSuffix' suffix id path = 'dropSuffix' suffix path
 @
-
->>> replaceSuffix (file "bar") (file "baz") (dir "foo" </> file "bar")
-dir "foo" </> file "baz"
->>> replaceSuffix (file "bar") (dir "baz") (dir "foo" </> file "bat")
-*** Exception: InvalidSuffix {suffix = "bar", pathToStrip = "foo/bat"}
-
->>> replaceSuffix (dir "foo" </> file "bar") (dir "baz") (root </> dir "foo" </> file "bar")
-root </> dir "baz"
 -}
 replaceSuffix
     :: MonadThrow m => Path b c -> Path b d -> Path a c -> m (Path a d)
 replaceSuffix oldSuffix newSuffix path =
-    fmap (</> newSuffix) (stripSuffix oldSuffix path)
+    fmap (</> newSuffix) (dropSuffix oldSuffix path)
+
+{-| Check to see if one `Path` is a suffix of another `Path`
+
+@
+'hasSuffix' suffix path = 'isJust' ('dropSuffix' suffix path)
+@
+-}
+hasSuffix :: Path b c -> Path a c -> Bool
+hasSuffix suffix path = isJust (dropSuffix suffix path)
+
+-- | Synonym for `dropSuffix`
+stripSuffix :: MonadThrow m => Path b c -> Path a c -> m (Path a b)
+stripSuffix = dropSuffix
+
+-- | Synonym for `hasSuffix`
+isSuffixOf :: Path b c -> Path a c -> Bool
+isSuffixOf = hasSuffix
 
 {-| Separate out the extension from a `Path`, returning the original
     path minus the extension and the extension (if present)
@@ -958,22 +1032,22 @@ splitExtensions (PathFile parent component0) =
     This is analogous to @"System.FilePath".`FilePath.takeExtension`@.
 
 @
-'extension' path = 'snd' ('splitExtension' path)
+'takeExtension' path = 'snd' ('splitExtension' path)
 @
 -}
-extension :: Path a 'File -> Maybe String
-extension path = snd (splitExtension path)
+takeExtension :: Path a 'File -> Maybe String
+takeExtension path = snd (splitExtension path)
 
 {-| Return the list of extensions for a `Path`
 
     This is analogous to @"System.FilePath".`FilePath.takeExtensions`@.
 
 @
-'extensions' path = 'snd' ('splitExtensions' path)
+'takeExtensions' path = 'snd' ('splitExtensions' path)
 @
 -}
-extensions :: Path a 'File -> [String]
-extensions path = snd (splitExtensions path)
+takeExtensions :: Path a 'File -> [String]
+takeExtensions path = snd (splitExtensions path)
 
 {-| Strip the extension (if present) from a `Path`
 
@@ -1001,16 +1075,16 @@ dropExtensions path = fst (splitExtensions path)
 
     This is analogous to @"System.FilePath".`FilePath.addExtension`@.
 
->>> addExtension (dir "foo" </> file "bar") "zip"
+>>> addExtension "zip" (dir "foo" </> file "bar")
 dir "foo" </> file "bar.zip"
->>> addExtension id "zip"
+>>> addExtension "zip" id
 *** Exception: EmptyPath {path = ""}
 
 -}
-addExtension :: MonadThrow m => Path a 'File -> String -> m (Path a 'File)
-addExtension PathId _ =
+addExtension :: MonadThrow m => String -> Path a 'File -> m (Path a 'File)
+addExtension _ PathId =
     Catch.throwM EmptyPath{ path = toFilePath PathId }
-addExtension (PathFile parent component) extension_ = do
+addExtension extension_ (PathFile parent component) = do
     pure (PathFile parent (FilePath.addExtension component extension_))
 
 {-| Add extensions to the end of a `Path`
@@ -1018,33 +1092,90 @@ addExtension (PathFile parent component) extension_ = do
 @
 'uncurry' 'addExtensions' ('splitExtensions' path) = path
 
-'addExtensions' path [] = []
+'addExtensions' [] path = path
 @
 
->>> addExtensions (dir "foo" </> file "bar") [ "tar", "gz" ]
+>>> addExtensions [ "tar", "gz" ] (dir "foo" </> file "bar")
 dir "foo" </> file "bar.tar.gz"
->>> addExtensions id [ "tar", "gz" ]
+>>> addExtensions [ "tar", "gz" ] id
 *** Exception: EmptyPath {path = ""}
->>> addExtensions id []
+>>> addExtensions [] id
 id
 
 -}
-addExtensions :: MonadThrow m => Path a 'File -> [String] -> m (Path a 'File)
-addExtensions PathId [ ] =
+addExtensions :: MonadThrow m => [String] -> Path a 'File -> m (Path a 'File)
+addExtensions [ ] PathId =
     pure PathId
-addExtensions PathId _ =
+addExtensions _ PathId =
     Catch.throwM EmptyPath{ path = toFilePath PathId }
-addExtensions (PathFile parent component) extensions_ = do
+addExtensions extensions_ (PathFile parent component) = do
     let newComponent = foldl FilePath.addExtension component extensions_
     pure (PathFile parent newComponent)
+
+{-| Replace an extension with a new one
+
+@
+'replaceExtension' extension path = 'addExtension' extension ('dropExtension' path)
+@
+-}
+replaceExtension :: MonadThrow m => String -> Path a 'File -> m (Path a 'File)
+replaceExtension extension_ path = addExtension extension_ (dropExtension path)
+
+{-| Replace any extensions with new ones
+
+@
+'replaceExtensions' extensions path = 'addExtensions' extensions ('dropExtensions' path)
+@
+-}
+replaceExtensions
+    :: MonadThrow m => [String] -> Path a 'File -> m (Path a 'File)
+replaceExtensions extensions_ path =
+    addExtensions extensions_ (dropExtensions path)
 
 {-| Check to see if a file has any extensions
 
     This is analogous to @"System.FilePath".`FilePath.hasExtension`@.
 
 @
-'hasExtension' path = 'not' ('null' ('extensions' path))
+'hasExtension' path = 'isJust' ('extension' path)
 @
 -}
 hasExtension :: Path a 'File -> Bool
-hasExtension path = not (null (extensions path))
+hasExtension path = isJust (extension path)
+
+{-| Check to see if a file has an extension
+
+@
+'hasExtensions' path = 'not' ('null' ('extension' path))
+@
+
+@
+'hasExtensions' = 'hasExtension'
+@
+-}
+hasExtensions :: Path a 'File -> Bool
+hasExtensions path = not (null (extensions path))
+
+-- | Synonym for `takeExtension`
+extension :: Path a 'File -> Maybe String
+extension = takeExtension
+
+-- | Synonym for `takeExtensions`
+extensions :: Path a 'File -> [String]
+extensions = takeExtensions
+
+-- | Synonym for `dropExtension`
+stripExtension :: Path a 'File -> Path a 'File
+stripExtension = dropExtension
+
+-- | Synonym for `dropExtensions`
+stripExtensions :: Path a 'File -> Path a 'File
+stripExtensions = dropExtensions
+
+-- | Synonym for `hasExtension`
+isExtensionOf :: Path a 'File -> Bool
+isExtensionOf = hasExtension
+
+-- | Synonym for `hasExtensions`
+areExtensionsOf :: Path a 'File -> Bool
+areExtensionsOf = hasExtensions
