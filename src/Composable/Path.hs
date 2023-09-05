@@ -228,6 +228,7 @@ data APathFrom a
     -- ^ A directory
     | AFile (Path a 'File)
     -- ^ A file
+    deriving stock (Show)
 
 -- | A path which can be either an absolute path or relative path
 data APathTo b
@@ -235,6 +236,7 @@ data APathTo b
     -- ^ An absolute path
     | Relative (Path 'Dir b)
     -- ^ A relative path
+    deriving stock (Show)
 
 -- | A directory or file which can be either an absolute path or relative path
 data APath
@@ -246,6 +248,7 @@ data APath
     -- ^ A relative path to a directory
     | RelativeFile (Path 'Dir 'File)
     -- ^ A relative path to a file
+    deriving stock (Show)
 
 -- | The root of the filesystem
 root :: Path 'Root 'Dir
