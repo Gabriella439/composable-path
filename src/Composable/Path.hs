@@ -102,7 +102,6 @@ module Composable.Path
     , (<<<)
     ) where
 
-import Control.Applicative (Alternative(..))
 import Control.Category (Category(..), (<<<), (>>>))
 import Control.Exception (Exception(..))
 import Control.Monad.Catch (MonadThrow(..))
@@ -744,11 +743,13 @@ file "bar"
 dir "bar" </> dir "baz"
 
 >>> dropPrefix (dir "foo") (file "foo")
-*** Exception: InvalidPrefix {prefix = "foo/", pathToStrip = "foo"}
+*** Exception: InvalidPrefix {prefix = "foo/", pathToStrip = ""}
 >>> dropPrefix (dir "foo") (dir "bar")
-*** Exception: InvalidPrefix {prefix = "foo/", pathToStrip = "bar/"}
+*** Exception: InvalidPrefix {prefix = "foo/", pathToStrip = ""}
 >>> dropPrefix (dir "foo" </> dir "bar") (dir "foo" </> dir "baz")
-*** Exception: InvalidPrefix {prefix = "foo/bar/", pathToStrip = "foo/baz/"}
+*** Exception: InvalidPrefix {prefix = "foo/bar/", pathToStrip = ""}
+>>> dropPrefix (dir "foo" </> dir "baz") (dir "foo" </> dir "bar" </> dir "baz")
+*** Exception: InvalidPrefix {prefix = "foo/baz/", pathToStrip = "foo/bar/baz/"}
 -}
 dropPrefix :: MonadThrow m => Path a b -> Path a c -> m (Path b c)
 dropPrefix prefix pathToStrip = case prefix of
@@ -766,56 +767,40 @@ dropPrefix prefix pathToStrip = case prefix of
             PathFile parent component -> do
                 newParent <- dropPrefix prefix parent
                 pure (PathFile newParent component)
-    PathDir parentL componentL ->
-        case alternative0 <|> alternative1 of
-            Just suffix -> pure suffix
-            Nothing -> Catch.throwM invalidPrefix
-      where
-        alternative0 =
-            case pathToStrip of
-                PathDir parentR componentR
-                    | componentL == componentR -> do
-                        _ <- dropPrefix parentL parentR
-                        pure PathId
-                _ ->
-                    empty
-
-        alternative1 = do
-            case pathToStrip of
-                PathId -> do
-                    empty
-                PathRoot -> do
-                    empty
-                PathDir parentR componentR -> do
+    PathDir parentL componentL -> do
+        case pathToStrip of
+            PathId -> do
+                Catch.throwM invalidPrefix
+            PathRoot -> do
+                Catch.throwM invalidPrefix
+            PathDir parentR componentR
+                | componentL == componentR -> do
+                    newParent <- dropPrefix parentL parentR
+                    case newParent of
+                        PathId -> pure PathId
+                        _      -> Catch.throwM invalidPrefix
+                | otherwise -> do
                     newParent <- dropPrefix prefix parentR
                     pure (PathDir newParent componentR)
-                PathFile parentR componentR -> do
-                    newParent <- dropPrefix prefix parentR
-                    pure (PathFile newParent componentR)
-    PathFile parentL componentL ->
-        case alternative0 <|> alternative1 of
-            Just suffix -> pure suffix
-            Nothing -> Catch.throwM invalidPrefix
-      where
-        alternative0 =
-            case pathToStrip of
-                PathFile parentR componentR
-                    | componentL == componentR -> do
-                        _ <- dropPrefix parentL parentR
-                        pure PathId
-                _ ->
-                    empty
-
-        alternative1 = do
-            case pathToStrip of
-                PathId -> do
-                    empty
-                PathRoot -> do
-                    empty
-                PathDir parentR componentR -> do
-                    newParent <- dropPrefix prefix parentR
-                    pure (PathDir newParent componentR)
-                PathFile parentR componentR -> do
+            PathFile parentR componentR -> do
+                newParent <- dropPrefix prefix parentR
+                pure (PathFile newParent componentR)
+    PathFile parentL componentL -> do
+        case pathToStrip of
+            PathId -> do
+                Catch.throwM invalidPrefix
+            PathRoot -> do
+                Catch.throwM invalidPrefix
+            PathDir parentR componentR -> do
+                newParent <- dropPrefix prefix parentR
+                pure (PathDir newParent componentR)
+            PathFile parentR componentR
+                | componentL == componentR -> do
+                    newParent <- dropPrefix parentL parentR
+                    case newParent of
+                        PathId -> pure PathId
+                        _      -> Catch.throwM invalidPrefix
+                | otherwise -> do
                     newParent <- dropPrefix prefix parentR
                     pure (PathFile newParent componentR)
   where
